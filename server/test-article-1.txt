@@ -1,0 +1,3 @@
+This is the first test article for MedEarn.
+It contains sample content to test the upload functionality.
+This article will be used to verify Walrus integration and local storage.

@@ -1,0 +1,1 @@
+This is a test article for MedEarn Walrus integration testing. It contains sample content to verify that the upload system works correctly with the decentralized storage.
