@@ -8,12 +8,16 @@ import { Ed25519Keypair } from '@mysten/sui.js/keypairs/ed25519';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui.js/client';
 import { fromB64 } from '@mysten/sui.js/utils';
 import { articleDB, Article } from './database';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Sui Private Key - Your actual key
-const SUI_PRIVATE_KEY = 'suiprivkey1qpcjh6auplv27k2s4h2j8suph6cv2aqnhmjvss3u7yylawazr92ky0vuwe8';
+// Get Sui Private Key from environment variable
+const SUI_PRIVATE_KEY = process.env.SUI_PRIVATE_KEY;
 
 // Parse Sui private key function
 function parseSuiPrivateKey(privateKeyString: string): Ed25519Keypair | null {
@@ -50,7 +54,12 @@ if ('suiClient' in walrusClient) {
 }
 
 // Parse Sui private key
-const keypair = parseSuiPrivateKey(SUI_PRIVATE_KEY);
+if (!SUI_PRIVATE_KEY) {
+    console.log('❌ SUI_PRIVATE_KEY environment variable not set - Walrus uploads will fail');
+    console.log('📝 Please add SUI_PRIVATE_KEY to your .env file');
+}
+
+const keypair = SUI_PRIVATE_KEY ? parseSuiPrivateKey(SUI_PRIVATE_KEY) : null;
 
 if (keypair) {
     console.log('✅ Sui private key parsed successfully');
@@ -274,8 +283,8 @@ app.post('/api/upload/string', async (req, res) => {
         const { content, fileName, isPublic = true } = req.body;
 
         if (!content || !fileName) {
-            return res.status(400).json({ 
-                error: 'Both content and fileName are required' 
+            return res.status(400).json({
+                error: 'Both content and fileName are required'
             });
         }
 
@@ -285,7 +294,7 @@ app.post('/api/upload/string', async (req, res) => {
         }
 
         console.log('Uploading string content to Walrus...');
-        
+
         // Convert string to buffer
         const contentBuffer = Buffer.from(content, 'utf8');
         const contentSize = contentBuffer.byteLength;
