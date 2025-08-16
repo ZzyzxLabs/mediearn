@@ -5,7 +5,6 @@ import path from 'path';
 export interface BlobInfo {
     id: string;
     title: string;
-    originalFileSize: number;
     uploadDate: string;
     ownerAddress: string;
     isPublic: boolean;

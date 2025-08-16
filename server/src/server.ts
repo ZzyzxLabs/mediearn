@@ -14,67 +14,6 @@ import { BlobInfo, BlobStorage } from './blobStorage';
 // Load environment variables
 dotenv.config();
 
-// Helper function to process blob content and extract actual data
-function processBlobContent(rawBlob: Uint8Array, expectedSize?: number): string {
-    console.log('🔍 Processing blob of length:', rawBlob.length);
-    
-    if (expectedSize && expectedSize > 0) {
-        console.log('🔍 Expected content size:', expectedSize);
-        
-        // Simply extract the first N bytes where N is the expected content size
-        // The actual content should be at the beginning of the blob
-        const actualContent = rawBlob.slice(0, expectedSize);
-        
-        console.log(`🔍 Extracting first ${expectedSize} bytes from blob`);
-        
-        // Decode as UTF-8
-        try {
-            const decoder = new TextDecoder('utf-8', { fatal: false });
-            const decodedString = decoder.decode(actualContent);
-            
-            // Clean up any remaining artifacts
-            const cleanedString = decodedString
-                .replace(/\0/g, '') // Remove null characters
-                .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
-                .trim();
-            
-            console.log('🔍 Extracted content:', cleanedString.substring(0, 100) + '...');
-            return cleanedString;
-            
-        } catch (error) {
-            console.warn('UTF-8 decode failed for extracted content');
-        }
-    }
-    
-    // Fallback: try to decode the entire blob as UTF-8
-    try {
-        const decoder = new TextDecoder('utf-8', { fatal: false });
-        const decodedString = decoder.decode(rawBlob);
-        
-        // Clean up the decoded string
-        const cleanedString = decodedString
-            .replace(/\0/g, '') // Remove null characters
-            .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
-            .replace(/\s+/g, ' ') // Normalize whitespace
-            .trim();
-        
-        if (cleanedString.length > 50) {
-            console.log('🔍 Using fallback decoded string:', cleanedString.substring(0, 100) + '...');
-            return cleanedString;
-        }
-        
-    } catch (error) {
-        console.warn('UTF-8 decode failed');
-    }
-
-    // If all else fails, return the first 100 bytes as hex for debugging
-    console.warn('Could not extract readable content, returning hex');
-    return Array.from(rawBlob.slice(0, Math.min(100, rawBlob.length))).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-
-
-
 
 const blobStorage = new BlobStorage();
 
@@ -237,10 +176,9 @@ app.post('/api/upload', async (req, res) => {
                 // Create WalrusFile object for the entire article content
                 const contentFile = WalrusFile.from({
                     contents: fileBuffer,
-                    identifier: `article-${title}-${Date.now()}`,
+                    identifier: 'README.md',
                     tags: {
-                        'type': 'article',
-                        'title': title
+                        'content-type': 'text/plain',
                     }
                 });
 
@@ -273,7 +211,6 @@ app.post('/api/upload', async (req, res) => {
             // Create blob info with preview text stored locally and content blob ID from Walrus
             blobInfo = blobStorage.createBlob({
                 title: title,
-                originalFileSize: content.length, // Store the actual content size, not file size
                 ownerAddress: ownerAddress,
                 isPublic: req.body.isPublic !== 'false', // Default to public unless explicitly set to false
                 previewText: previewText, // Store preview text locally
@@ -342,7 +279,7 @@ app.get('/api/blobs/preview', (req, res) => {
                 blobId: blob.id,
                 previewText: blob.previewText
             };
-        });
+        })
 
         res.json(previewsWithContent);
     } catch (error) {
@@ -374,12 +311,29 @@ app.get('/api/blobs/:id/content', async (req, res) => {
                 return res.status(404).json({ error: 'Content blob ID not available' });
             }
 
-            const rawContent = await walrusClient.readBlob({ blobId: blob.walrus.contentBlob.blobId });
-            console.log(`🔍 Raw content for blob ${id}:`, rawContent);
+            // Use getBlob to get the blob object first
+            const blobData = await walrusClient.getBlob({ blobId: blob.walrus.contentBlob.blobId });
+            console.log(`🔍 Blob data returned:`, blobData);
 
-            // Process the blob to extract actual content using the stored content size
-            const processedContent = processBlobContent(rawContent, blob.originalFileSize);
-            console.log(`🔍 Processed content for blob ${id}:`, processedContent);
+            if (!blobData) {
+                return res.status(404).json({ error: 'No blob data returned from Walrus' });
+            }
+
+            // Then call files() on the blob object with the identifiers
+            const files = await blobData.files({ identifiers: ['README.md'] });
+            console.log(`🔍 Files returned for blob ${id}:`, files);
+
+            if (!files || files.length === 0) {
+                return res.status(404).json({ error: 'No files returned from Walrus' });
+            }
+
+            const file = files[0];
+            console.log(`🔍 File object:`, file);
+
+            // Get content directly from file.text
+            const processedContent = await file.text();
+
+            console.log(`🔍 Content from file.text:`, processedContent.substring(0, 200) + '...');
 
             res.json({
                 blobId: id,
@@ -388,8 +342,7 @@ app.get('/api/blobs/:id/content', async (req, res) => {
                 metadata: {
                     uploadDate: blob.uploadDate,
                     ownerAddress: blob.ownerAddress,
-                    isPublic: blob.isPublic,
-                    originalFileSize: blob.originalFileSize
+                    isPublic: blob.isPublic
                 }
             });
         } catch (walrusError) {
