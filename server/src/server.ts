@@ -4,9 +4,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { WalrusClient, TESTNET_WALRUS_PACKAGE_CONFIG } from '@mysten/walrus';
-import { Ed25519Keypair } from '@mysten/sui.js/keypairs/ed25519';
-import { SuiClient, getFullnodeUrl } from '@mysten/sui.js/client';
-import { fromB64 } from '@mysten/sui.js/utils';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { fromB64 } from '@mysten/sui/utils';
 import { articleDB, Article } from './database';
 import dotenv from 'dotenv';
 
