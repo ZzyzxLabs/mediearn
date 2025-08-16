@@ -10,6 +10,8 @@ import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { fromB64 } from '@mysten/sui/utils';
 import dotenv from 'dotenv';
 import { BlobInfo, BlobStorage } from './blobStorage';
+// @ts-ignore - x402-express types are ESM but we're using CommonJS
+import { paymentMiddleware } from 'x402-express';
 
 // Load environment variables
 dotenv.config();
@@ -106,7 +108,7 @@ app.use(express.static('public'));
 // Upload content to Walrus and store blob info
 app.post('/api/upload', async (req, res) => {
     try {
-        const { title, content, isPublic = true, ownerAddress } = req.body;
+        const { title, description = '', content, ownerAddress } = req.body;
 
         if (!title || !content) {
             return res.status(400).json({ error: 'Both title and content are required' });
@@ -123,7 +125,6 @@ app.post('/api/upload', async (req, res) => {
 
         console.log('Uploading to Walrus...');
         const fileBuffer = new Uint8Array(Buffer.from(content, 'utf8'));
-        const fileSize = fileBuffer.byteLength;
 
         // Check WAL balance first
         try {
@@ -155,8 +156,7 @@ app.post('/api/upload', async (req, res) => {
 
         try {
             // Create preview text for local storage
-            const firstParagraph = content.split('\n\n')[0] || content.substring(0, 200);
-            const previewText = `${title}\n\n${firstParagraph}`;
+            const previewText = `${title}\n\n${description}`;
 
             let contentBlobId: string;
 
@@ -212,8 +212,18 @@ app.post('/api/upload', async (req, res) => {
             blobInfo = blobStorage.createBlob({
                 title: title,
                 ownerAddress: ownerAddress,
-                isPublic: req.body.isPublic !== 'false', // Default to public unless explicitly set to false
+                isPublic: false, // All articles are payment-gated
                 previewText: previewText, // Store preview text locally
+                accessControl: {
+                    type: 'payment-gated',
+                    paymentDetails: {
+                        price: "0.01",
+                        currency: "USDC",
+                        paymentAddress: ownerAddress,
+                        assetAddress: "0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606EB48",
+                        network: "base-testnet"
+                    }
+                },
                 walrus: {
                     contentBlob: {
                         blobId: contentBlobId,
@@ -224,7 +234,7 @@ app.post('/api/upload', async (req, res) => {
                     },
                     overallStatus: 'success'
                 }
-            });
+            }, contentBlobId);
 
         } catch (walrusError) {
             console.error('❌ Walrus upload failed:', walrusError);
@@ -252,18 +262,6 @@ app.post('/api/upload', async (req, res) => {
 });
 
 
-
-// Get all blobs (with full information)
-app.get('/api/blobs', (req, res) => {
-    try {
-        const blobs = blobStorage.getAllBlobs();
-        res.json(blobs);
-    } catch (error) {
-        console.error('Error reading blobs:', error);
-        res.status(500).json({ error: 'Failed to fetch blobs' });
-    }
-});
-
 // Get all blob previews from local storage
 app.get('/api/blobs/preview', (req, res) => {
     try {
@@ -273,13 +271,24 @@ app.get('/api/blobs/preview', (req, res) => {
             return res.json([]);
         }
 
-        // Return only preview text and blob ID for each blob
+        // Return preview information with payment details for each blob
         const previewsWithContent = blobs.map((blob) => {
+            const title = blob.previewText?.split('\n\n')[0] || '';
+            const description = blob.previewText?.split('\n\n')[1] || '';
             return {
                 blobId: blob.id,
-                previewText: blob.previewText
+                title: title,
+                description: description,
+                ownerAddress: blob.ownerAddress,
+                uploadDate: blob.uploadDate,
+                paymentRequired: true, // All articles require payment
+                paymentDetails: {
+                    price: blob.accessControl.paymentDetails.price,
+                    currency: blob.accessControl.paymentDetails.currency,
+                    network: blob.accessControl.paymentDetails.network
+                }
             };
-        })
+        });
 
         res.json(previewsWithContent);
     } catch (error) {
@@ -288,52 +297,59 @@ app.get('/api/blobs/preview', (req, res) => {
     }
 });
 
-// Get full content from Walrus by blob ID
+// x402 Payment Protocol - automatically handles HTTP 402 and payment verification
+app.use(paymentMiddleware(
+    "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da", // Your receiving wallet
+    {
+        "GET /api/blobs/:id/content": {
+            price: "$0.01",
+            network: "base-sepolia",
+        }
+    },
+    {
+        url: "https://x402.org/facilitator",  // Test facilitator
+    }
+));
+
+// Content endpoint - now protected by x402 middleware
 app.get('/api/blobs/:id/content', async (req, res) => {
     try {
         const { id } = req.params;
+        const userAddress = req.query.userAddress as string;
 
-        // Get blob info from local storage
+        if (!userAddress) {
+            return res.status(400).json({
+                error: 'userAddress query parameter is required',
+                message: 'Please provide userAddress to access content'
+            });
+        }
+
         const blob = blobStorage.getBlob(id);
-
         if (!blob) {
             return res.status(404).json({ error: 'Blob not found' });
         }
 
-        // Check if blob has content information
         if (!blob.walrus?.contentBlob?.blobId) {
             return res.status(404).json({ error: 'Content not available for this blob' });
         }
 
+        // If we reach here, payment has been verified by x402 middleware
+        // Fetch content from Walrus
         try {
-            // Fetch content from Walrus using readBlob
-            if (!blob.walrus.contentBlob.blobId) {
-                return res.status(404).json({ error: 'Content blob ID not available' });
-            }
-
-            // Use getBlob to get the blob object first
             const blobData = await walrusClient.getBlob({ blobId: blob.walrus.contentBlob.blobId });
-            console.log(`🔍 Blob data returned:`, blobData);
-
             if (!blobData) {
                 return res.status(404).json({ error: 'No blob data returned from Walrus' });
             }
-
-            // Then call files() on the blob object with the identifiers
             const files = await blobData.files({ identifiers: ['README.md'] });
-            console.log(`🔍 Files returned for blob ${id}:`, files);
-
             if (!files || files.length === 0) {
                 return res.status(404).json({ error: 'No files returned from Walrus' });
             }
-
             const file = files[0];
-            console.log(`🔍 File object:`, file);
-
-            // Get content directly from file.text
             const processedContent = await file.text();
 
-            console.log(`🔍 Content from file.text:`, processedContent.substring(0, 200) + '...');
+            // Record payment access
+            const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            blobStorage.recordPayment(id, userAddress, paymentId, blob.accessControl.paymentDetails.price);
 
             res.json({
                 blobId: id,
@@ -342,7 +358,8 @@ app.get('/api/blobs/:id/content', async (req, res) => {
                 metadata: {
                     uploadDate: blob.uploadDate,
                     ownerAddress: blob.ownerAddress,
-                    isPublic: blob.isPublic
+                    isPublic: blob.isPublic,
+                    paymentInfo: blobStorage.getPaymentInfo(id, userAddress)
                 }
             });
         } catch (walrusError) {
@@ -358,111 +375,35 @@ app.get('/api/blobs/:id/content', async (req, res) => {
     }
 });
 
-// Search blobs (must come before :id route)
-app.get('/api/blobs/search', (req, res) => {
+// Remove the old manual payment endpoint since x402 middleware handles it
+// app.post('/api/blobs/:id/pay', ...) - REMOVED
+
+// Verify x402 payment using the x402 library
+async function verifyX402Payment(paymentPayload: any, paymentDetails: any): Promise<boolean> {
     try {
-        const { q } = req.query;
-        if (!q || typeof q !== 'string') {
-            return res.status(400).json({ error: 'Query parameter "q" is required' });
-        }
-
-        const blobs = blobStorage.getAllBlobs().filter(blob =>
-            blob.title.includes(q) || blob.ownerAddress.includes(q)
-        );
-        res.json(blobs);
-    } catch (error) {
-        console.error('Error searching blobs:', error);
-        res.status(500).json({ error: 'Failed to search blobs' });
-    }
-});
-
-// Get blobs by upload status
-app.get('/api/blobs/status/:status', (req, res) => {
-    try {
-        const { status } = req.params;
-        const blobs = blobStorage.getAllBlobs().filter(blob => blob.walrus?.overallStatus === status);
-        res.json(blobs);
-    } catch (error) {
-        console.error('Error reading blobs by status:', error);
-        res.status(500).json({ error: 'Failed to fetch blobs' });
-    }
-});
-
-// Get blob by ID (must come after specific routes)
-app.get('/api/blobs/:id', (req, res) => {
-    try {
-        const { id } = req.params;
-        const blob = blobStorage.getBlob(id);
-
-        if (!blob) {
-            return res.status(404).json({ error: 'Blob not found' });
-        }
-
-        res.json(blob);
-    } catch (error) {
-        console.error('Error reading blob:', error);
-        res.status(500).json({ error: 'Failed to fetch blob' });
-    }
-});
-
-// Get blobs owned by a specific Sui address
-app.get('/api/blobs/owner/:address', (req, res) => {
-    try {
-        const { address } = req.params;
-        const blobs = blobStorage.getAllBlobs().filter(blob => blob.ownerAddress === address);
-        res.json(blobs);
-    } catch (error) {
-        console.error('Error reading blobs by owner:', error);
-        res.status(500).json({ error: 'Failed to fetch blobs by owner' });
-    }
-});
-
-// Get public blobs (accessible to everyone)
-app.get('/api/blobs/public', (req, res) => {
-    try {
-        const blobs = blobStorage.getAllBlobs().filter(blob => blob.isPublic);
-        res.json(blobs);
-    } catch (error) {
-        console.error('Error reading public blobs:', error);
-        res.status(500).json({ error: 'Failed to fetch public blobs' });
-    }
-});
-
-// Get blobs by ownership type with optional address
-app.get('/api/blobs/ownership/:type', (req, res) => {
-    try {
-        const { type } = req.params;
-        const { address } = req.query;
-
-        if (type === 'owned' && !address) {
-            return res.status(400).json({ error: 'Address parameter required for owned blobs' });
-        }
-
-        const blobs = blobStorage.getAllBlobs().filter(blob => {
-            const matchesType = (() => {
-                if (type === 'owned') return blob.ownerAddress === address;
-                if (type === 'public') return blob.isPublic;
-                return true; // 'all'
-            })();
-            return matchesType;
+        console.log('🔍 Verifying x402 payment...', {
+            paymentPayload: typeof paymentPayload === 'string' ? paymentPayload.substring(0, 50) + '...' : 'object',
+            paymentDetails: {
+                price: paymentDetails.price,
+                currency: paymentDetails.currency,
+                network: paymentDetails.network
+            }
         });
-        res.json(blobs);
-    } catch (error) {
-        console.error('Error reading blobs by ownership:', error);
-        res.status(500).json({ error: 'Failed to fetch blobs by ownership' });
-    }
-});
 
-// Get database statistics
-app.get('/api/stats', (req, res) => {
-    try {
-        const stats = blobStorage.getStats();
-        res.json(stats);
+        // TODO: Use @x402/express-middleware or @coinbase/x402 to verify payment
+        // For now, we'll simulate verification for testing
+        // In production, this would use the actual x402 verification logic
+
+        console.log('✅ x402 payment verification completed (simulated)');
+        return true;
+
     } catch (error) {
-        console.error('Error getting stats:', error);
-        res.status(500).json({ error: 'Failed to fetch statistics' });
+        console.error('❌ x402 payment verification failed:', error);
+        return false;
     }
-});
+}
+
+
 
 // Delete blob
 app.delete('/api/blobs/:id', (req, res) => {

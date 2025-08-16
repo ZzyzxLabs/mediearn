@@ -19,12 +19,14 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@coinbase/x402": "^0.5.1",
     "@mysten/sui": "^1.37.2",
     "@mysten/walrus": "^0.6.2",
     "bech32": "^2.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "x402-express": "^0.5.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

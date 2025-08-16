@@ -9,30 +9,83 @@ export interface BlobInfo {
     ownerAddress: string;
     isPublic: boolean;
     previewText?: string; // Optional preview text stored locally
+    accessControl: {
+        type: 'payment-gated'; // All articles are payment-gated
+        paymentDetails: {
+            price: string;
+            currency: string;
+            paymentAddress: string;
+            assetAddress: string;
+            network: string;
+        };
+        maxAccessCount?: number;
+    };
+    // Track payments for access control
+    payments: {
+        [userAddress: string]: {
+            paymentId: string;
+            amount: string;
+            timestamp: string;
+            accessGranted: boolean;
+        };
+    };
     walrus: {
         contentBlob: {
-            blobId: string | null;
-            storageEpochs: number | null;
+            blobId: string;
+            storageEpochs: number;
             isCertified: boolean;
-            uploadStatus: 'pending' | 'success' | 'failed';
-            uploadDate: string | null;
-            errorMessage?: string;
+            uploadStatus: string;
+            uploadDate: string;
         };
-        overallStatus: 'pending' | 'success' | 'failed' | 'partial';
+        overallStatus: string;
     };
 }
 
 // Simple in-memory storage for blob info
 export class BlobStorage {
     private blobs: Map<string, BlobInfo> = new Map();
-    private blobInfoFile = 'data/blob-info.json';
+    private readonly dataFile = 'data/blob-info.json';
 
     constructor() {
         this.loadBlobInfo();
+        this.migrateExistingBlobs();
+    }
+
+    // Migrate existing blobs to new structure
+    private migrateExistingBlobs(): void {
+        let migrated = false;
+
+        for (const [id, blob] of this.blobs) {
+            if (!blob.accessControl) {
+                // Add missing accessControl structure
+                blob.accessControl = {
+                    type: 'payment-gated',
+                    paymentDetails: {
+                        price: "0.01",
+                        currency: "USDC",
+                        paymentAddress: blob.ownerAddress,
+                        assetAddress: "0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606EB48",
+                        network: "base-testnet"
+                    }
+                };
+                migrated = true;
+            }
+
+            if (!blob.payments) {
+                // Add missing payments tracking
+                blob.payments = {};
+                migrated = true;
+            }
+        }
+
+        if (migrated) {
+            console.log('🔄 Migrated existing blobs to new structure');
+            this.saveBlobInfo();
+        }
     }
 
     private ensureDirectory(): void {
-        const dir = path.dirname(this.blobInfoFile);
+        const dir = path.dirname(this.dataFile);
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
@@ -41,8 +94,8 @@ export class BlobStorage {
     private loadBlobInfo(): void {
         try {
             this.ensureDirectory();
-            if (fs.existsSync(this.blobInfoFile)) {
-                const data = fs.readFileSync(this.blobInfoFile, 'utf8');
+            if (fs.existsSync(this.dataFile)) {
+                const data = fs.readFileSync(this.dataFile, 'utf8');
                 const parsed = JSON.parse(data);
                 if (parsed.blobs) {
                     this.blobs = new Map(Object.entries(parsed.blobs));
@@ -61,23 +114,81 @@ export class BlobStorage {
                 blobs: Object.fromEntries(this.blobs),
                 lastUpdated: new Date().toISOString()
             };
-            fs.writeFileSync(this.blobInfoFile, JSON.stringify(data, null, 2));
+            fs.writeFileSync(this.dataFile, JSON.stringify(data, null, 2));
         } catch (error) {
             console.error('❌ Error saving blob info:', error);
         }
     }
 
-    createBlob(blobData: Omit<BlobInfo, 'id' | 'uploadDate'>): BlobInfo {
-        const id = Date.now().toString();
+    createBlob(blobData: Omit<BlobInfo, 'id' | 'uploadDate' | 'payments'>, blobId: string): BlobInfo {
         const blob: BlobInfo = {
             ...blobData,
-            id,
-            uploadDate: new Date().toISOString()
+            id: blobId, // Use the provided blobId as the local ID
+            uploadDate: new Date().toISOString(),
+            accessControl: {
+                type: 'payment-gated', // All articles are payment-gated
+                paymentDetails: {
+                    price: "0.01",
+                    currency: "USDC",
+                    paymentAddress: blobData.ownerAddress,
+                    assetAddress: "0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606EB48",
+                    network: "base-testnet"
+                }
+            },
+            payments: {}, // Initialize empty payments tracking
+            walrus: blobData.walrus || {
+                contentBlob: {
+                    blobId: '',
+                    storageEpochs: 1,
+                    isCertified: false,
+                    uploadStatus: 'pending',
+                    uploadDate: new Date().toISOString()
+                },
+                overallStatus: 'pending'
+            }
         };
-
-        this.blobs.set(id, blob);
+        this.blobs.set(blobId, blob);
         this.saveBlobInfo();
         return blob;
+    }
+
+    // Record a payment for access
+    recordPayment(blobId: string, userAddress: string, paymentId: string, amount: string): boolean {
+        const blob = this.blobs.get(blobId);
+        if (!blob) {
+            return false;
+        }
+
+        blob.payments[userAddress] = {
+            paymentId,
+            amount,
+            timestamp: new Date().toISOString(),
+            accessGranted: true
+        };
+
+        this.saveBlobInfo();
+        return true;
+    }
+
+    // Check if user has paid for access
+    hasPaidAccess(blobId: string, userAddress: string): boolean {
+        const blob = this.blobs.get(blobId);
+        if (!blob) {
+            return false;
+        }
+
+        const payment = blob.payments[userAddress];
+        return payment?.accessGranted === true;
+    }
+
+    // Get payment info for a user
+    getPaymentInfo(blobId: string, userAddress: string) {
+        const blob = this.blobs.get(blobId);
+        if (!blob) {
+            return null;
+        }
+
+        return blob.payments[userAddress] || null;
     }
 
     getAllBlobs(): BlobInfo[] {

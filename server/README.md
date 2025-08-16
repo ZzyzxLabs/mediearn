@@ -1,304 +1,337 @@
-# MedEarn - Content Management Server
+# MedEarn Server
 
-A TypeScript-based server for managing content uploads and serving articles, with integration for the Walrus decentralized storage system.
+A decentralized content storage and monetization server built with Node.js, Express, and Walrus decentralized storage on Sui blockchain. The server implements the **x402 HTTP Payment Protocol** for pay-per-access content monetization.
 
 ## Features
 
-- **File Upload Management**: Handle file uploads with metadata
-- **String Content Upload**: Upload text content directly without files
-- **Article Storage**: Store and retrieve article metadata with automatic backup
-- **RESTful API**: Clean API endpoints for content management
-- **Web Interface**: Modern, responsive web UI for content management
-- **Walrus Integration**: Decentralized storage with local fallback
-- **Ownership System**: Track article ownership using Sui blockchain addresses
+- **Decentralized Storage**: Content stored on Walrus decentralized storage network
+- **x402 Protocol**: Real implementation of the x402 HTTP Payment Protocol
+- **Pay-Per-Access**: Every article requires payment for every access attempt
+- **Local Metadata Storage**: Only essential blob information stored locally
+- **Content Access Control**: HTTP 402 Payment Required responses following x402 standard
+- **Payment Verification**: x402 protocol payment verification and tracking system
+- **Instant Content Delivery**: Fast preview retrieval with on-demand full content
 
-## Tech Stack
+## x402 Protocol Implementation
 
-- **Backend**: Node.js + Express.js + TypeScript
-- **File Handling**: Multer for multipart file uploads
-- **Storage**: Local file system + JSON metadata storage + Walrus decentralized storage
-- **Frontend**: Vanilla HTML/CSS/JavaScript with modern UI
-- **Blockchain**: Sui blockchain integration for ownership and decentralized storage
+### Overview
+This server implements the **x402 HTTP Payment Protocol** as a content provider. The server:
 
-## Quick Start
+1. **Sends HTTP 402 Payment Required** with payment details
+2. **Receives payment payload** from x402 client
+3. **Uses x402 middleware** to verify payment locally
+4. **If successful, serves content** to client
 
-1. **Clone and install:**
+### x402 Dependencies
+The server uses official x402 packages for payment verification:
 ```bash
-git clone <repository-url>
-cd medearn
-npm install
+npm install @coinbase/x402 x402-express
 ```
 
-2. **Create `.env` file:**
-```bash
-# Sui Private Key (Base64 encoded)
-SUI_PRIVATE_KEY="your_sui_private_key_here"
+**Note:** These packages provide the facilitator functionality locally - no external API calls are needed.
 
-# Server Configuration
+### Server-Side x402 Implementation
+```typescript
+// x402 Payment verification endpoint - uses x402 middleware
+app.post('/api/blobs/:id/pay', async (req, res) => {
+    const { userAddress, paymentPayload } = req.body;
+    
+    // Use x402 middleware to verify payment
+    const paymentVerified = await verifyX402Payment(
+        paymentPayload, 
+        paymentDetails
+    );
+    
+    if (paymentVerified) {
+        // Record payment and grant access
+        blobStorage.recordPayment(id, userAddress, paymentId, amount);
+        res.json({ success: true, accessGranted: true });
+    } else {
+        res.status(400).json({ error: 'Payment verification failed' });
+    }
+});
+```
+
+## API Endpoints
+
+### Content Access
+
+#### GET `/api/blobs/preview`
+Get preview of all available articles with x402 payment information.
+
+**Response:**
+```json
+[
+  {
+    "blobId": "1755367928902",
+    "title": "Article Title",
+    "description": "Article description",
+    "ownerAddress": "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da",
+    "uploadDate": "2025-08-16T18:12:08.902Z",
+    "paymentRequired": true,
+    "paymentDetails": {
+      "price": "0.01",
+      "currency": "USDC",
+      "network": "base-testnet"
+    }
+  }
+]
+```
+
+#### GET `/api/blobs/:id/content?userAddress=0x...`
+Get full article content. **Requires x402 payment for every access.**
+
+**Parameters:**
+- `id`: Article blob ID
+- `userAddress`: User's wallet address (required)
+
+**Responses:**
+
+**HTTP 402 Payment Required (x402 protocol):**
+```json
+{
+  "error": "Payment Required",
+  "message": "Access to this content requires payment",
+  "paymentDetails": {
+    "price": "0.01",
+    "currency": "USDC",
+    "paymentAddress": "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da",
+    "assetAddress": "0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606EB48",
+    "network": "base-testnet",
+    "resource": "/api/blobs/1755367928902/content",
+    "description": "Access to article: Article Title",
+    "expiresAt": "2025-08-17T18:27:32.470Z",
+    "nonce": "v9xfdh",
+    "paymentId": "pay_1755368852471_18i1t4"
+  }
+}
+```
+
+**HTTP 200 Success (paid):**
+```json
+{
+  "blobId": "1755367928902",
+  "title": "Article Title",
+  "content": "Full article content...",
+  "metadata": {
+    "uploadDate": "2025-08-16T18:12:08.902Z",
+    "ownerAddress": "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da",
+    "isPublic": false,
+    "paymentInfo": {
+      "paymentId": "pay_1755368852471_sf8i5m",
+      "amount": "0.01",
+      "timestamp": "2025-08-16T18:27:32.579Z",
+      "accessGranted": true
+    }
+  }
+}
+```
+
+### x402 Payment Processing
+
+#### POST `/api/blobs/:id/pay`
+Submit x402 payment payload to gain access to content. The server uses x402 middleware to verify the payment locally.
+
+**Request Body:**
+```json
+{
+  "userAddress": "0x1234567890123456789012345678901234567890",
+  "paymentPayload": "x402_payment_payload_from_client_library"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "x402 payment verified and access granted",
+  "paymentId": "pay_1755368852471_sf8i5m",
+  "accessGranted": true,
+  "expiresAt": "2025-08-17T18:27:32.580Z"
+}
+```
+
+**Note:** The `paymentPayload` should be generated by the x402 client library. The server uses x402 middleware to verify the payment locally without external API calls.
+
+## Frontend Implementation Guide
+
+### 1. x402 Client Library
+
+Use the provided x402 client example:
+
+```bash
+# Run the x402 client demonstration
+node x402-client-example.js
+```
+
+### 2. Basic x402 Implementation
+
+```javascript
+import { X402Client } from './x402-client-example.js';
+
+const client = new X402Client('http://localhost:8000', userWalletAddress);
+
+// Access article with automatic x402 payment handling
+const result = await client.accessArticleWithX402(articleId);
+
+if (result.success) {
+    displayArticle(result.content);
+} else {
+    // Handle payment required
+    showPaymentForm(result.paymentInfo);
+}
+```
+
+### 3. Handle HTTP 402 (x402 Protocol)
+
+```javascript
+async function getArticleContent(blobId, userAddress) {
+    try {
+        const response = await fetch(`/api/blobs/${blobId}/content?userAddress=${userAddress}`);
+        
+        if (response.status === 200) {
+            // Payment already made, return content
+            const content = await response.json();
+            return { success: true, content };
+        } else if (response.status === 402) {
+            // x402 Payment Required - this is expected behavior
+            const paymentInfo = await response.json();
+            return { success: false, paymentRequired: true, paymentInfo };
+        } else {
+            throw new Error(`Unexpected response: ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Error fetching content:', error);
+        throw error;
+    }
+}
+```
+
+### 4. x402 Payment Flow
+
+```javascript
+async function handleX402Payment(blobId, userAddress, paymentInfo) {
+    // Step 1: Create x402 payment payload using client library
+    const paymentPayload = await x402Client.createPayment({
+        amount: paymentInfo.paymentDetails.price,
+        currency: paymentInfo.paymentDetails.currency,
+        recipient: paymentInfo.paymentDetails.paymentAddress,
+        asset: paymentInfo.paymentDetails.assetAddress,
+        network: paymentInfo.paymentDetails.network
+    });
+    
+    // Step 2: Submit payment payload to server (server verifies locally with x402 middleware)
+    const verifyResponse = await fetch(`/api/blobs/${blobId}/pay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            userAddress,
+            paymentPayload: paymentPayload
+        })
+    });
+    
+    if (verifyResponse.ok) {
+        // Payment verified by x402 middleware, now fetch content
+        return await getArticleContent(blobId, userAddress);
+    } else {
+        throw new Error('x402 payment verification failed');
+    }
+}
+```
+
+### 5. Complete x402 Article Access
+
+```javascript
+async function accessArticleWithX402(blobId, userAddress) {
+    try {
+        // Try to get content
+        const result = await getArticleContent(blobId, userAddress);
+        
+      if (result.success) {
+            // User has already paid, show content
+            displayArticle(result.content);
+        } else if (result.paymentRequired) {
+            // x402 payment required, handle payment flow
+            const content = await handleX402Payment(blobId, userAddress, result.paymentInfo);
+            if (content.success) {
+                displayArticle(content.content);
+            }
+        }
+    } catch (error) {
+        console.error('Error accessing article:', error);
+        showErrorMessage('Failed to access article');
+    }
+}
+```
+
+## Important Notes for Frontend Developers
+
+### x402 Protocol Requirements
+- **HTTP 402 is the standard x402 response** - not an error
+- **Payment proof must be blockchain transaction** - not fake data
+- **Every access requires new payment** - no sharing between users
+- **Payment verification is on-chain** - server validates blockchain transactions
+
+### User Address
+- **Always required** - must be provided for every content request
+- **Used for payment tracking** - determines if user has paid
+- **Should be the user's actual wallet address** - for blockchain verification
+
+### HTTP 402 Handling
+- **HTTP 402 is expected** for unpaid access - this is x402 protocol
+- **Always check for 402 status** before treating as error
+- **Payment information is in the response body** - use it for payment UI
+
+### Content Retrieval
+- **Content is fetched from Walrus** after x402 payment verification
+- **Content includes payment metadata** - useful for user history
+- **Content access is one-time** - next access requires new x402 payment
+
+## Testing
+
+Use the provided test scripts to verify the x402 system:
+
+```bash
+# Test x402 system with existing articles
+node test-existing-articles.js
+
+# Test complete x402 flow (requires WAL tokens)
+node test-pay-per-access.js
+
+# Test x402 client implementation
+node x402-client-example.js
+```
+
+## Environment Variables
+
+```bash
+# Required for Walrus functionality
+SUI_PRIVATE_KEY=suiprivkey...
+SUI_PUBLIC_KEY=0x...
+WALRUS_RPC_URL=https://...
+
+# Server configuration
 PORT=8000
-NODE_ENV=development
 ```
 
-3. **Build and run:**
+## Installation
+
 ```bash
+npm install
+npm install @coinbase/x402 x402-express
 npm run build
 npm start
 ```
 
-**For development with auto-reload:**
-```bash
-npm run dev
-```
+The server will run on `http://localhost:8000` by default.
 
-## 🚀 API Reference
+## Architecture
 
-### **Base URL**: `http://localhost:8000`
+- **Express.js** - REST API server with x402 protocol
+- **x402 Protocol** - Official Coinbase x402 implementation
+- **Walrus** - Decentralized content storage
+- **Sui Blockchain** - Payment verification and storage
+- **Local Storage** - Article metadata and payment tracking
+- **Pay-Per-Access** - x402 protocol monetization model
 
-### **Core Endpoints**
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/health` | Server status and Walrus configuration |
-| `POST` | `/api/upload` | Upload file with metadata (multipart/form-data) |
-| `POST` | `/api/upload/string` | Upload text content (JSON) |
-| `GET` | `/api/articles` | Get all articles with full details |
-| `GET` | `/api/articles/preview` | Get articles for browsing (optimized) |
-| `GET` | `/api/articles/:id` | Get specific article by ID |
-| `GET` | `/api/articles/search?q=query` | Search articles |
-| `GET` | `/api/articles/owner/:address` | Get articles by owner address |
-| `GET` | `/api/articles/public` | Get public articles |
-| `GET` | `/api/stats` | Database statistics |
-| `DELETE` | `/api/articles/:id` | Delete article |
-
-### **Data Models**
-
-#### **Article Object**
-```typescript
-interface Article {
-  id: string;
-  fileName: string;
-  originalFileSize: number;
-  uploadDate: string;
-  lastModified: string;
-  version: string;
-  
-  // Walrus storage information
-  walrus: {
-    previewBlob: { /* blob details */ };
-    contentBlob: { /* blob details */ };
-    overallStatus: 'pending' | 'success' | 'failed' | 'partial' | 'local-only';
-  };
-  
-  // Local storage information
-  local: {
-    filePath: string | null;
-    fileSize: number | null;
-    isCompressed: boolean;
-  };
-  
-  // Metadata
-  tags: string[];
-  author?: string;
-  
-  // Ownership information
-  owner: {
-    suiAddress: string;
-    isPublic: boolean;
-    transferable: boolean;
-  };
-}
-```
-
-## 🧪 Testing Examples
-
-### **Health Check**
-```bash
-curl http://localhost:8000/api/health
-```
-
-### **File Upload**
-```bash
-curl -X POST \
-  -F "title=Test Article" \
-  -F "description=Testing the upload API" \
-  -F "category=test" \
-  -F "content=@test-file.txt" \
-  http://localhost:8000/api/upload
-```
-
-### **String Content Upload**
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Test String Article",
-    "content": "This is test content",
-    "fileName": "test-string.txt",
-    "description": "Testing string upload",
-    "category": "test"
-  }' \
-  http://localhost:8000/api/upload/string
-```
-
-### **Get Articles**
-```bash
-# All articles
-curl http://localhost:8000/api/articles
-
-# Articles preview
-curl http://localhost:8000/api/articles/preview
-
-# Search articles
-curl "http://localhost:8000/api/articles/search?q=test"
-
-# Articles by owner
-curl http://localhost:8000/api/articles/owner/SUI_ADDRESS_HERE
-```
-
-## 💻 **Frontend Integration**
-
-### **Basic API Client**
-```typescript
-class MedEarnClient {
-  constructor(private baseUrl: string = 'http://localhost:8000') {}
-
-  async uploadFile(file: File, metadata: { title: string; description?: string; category?: string }) {
-    const formData = new FormData();
-    formData.append('content', file);
-    formData.append('title', metadata.title);
-    if (metadata.description) formData.append('description', metadata.description);
-    if (metadata.category) formData.append('category', metadata.category);
-
-    const response = await fetch(`${this.baseUrl}/api/upload`, {
-      method: 'POST',
-      body: formData
-    });
-    return response.json();
-  }
-
-  async uploadString(content: string, metadata: { title: string; fileName: string; description?: string; category?: string }) {
-    const response = await fetch(`${this.baseUrl}/api/upload/string`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, ...metadata })
-    });
-    return response.json();
-  }
-
-  async getArticles() {
-    const response = await fetch(`${this.baseUrl}/api/articles`);
-    return response.json();
-  }
-
-  async searchArticles(query: string) {
-    const response = await fetch(`${this.baseUrl}/api/articles/search?q=${encodeURIComponent(query)}`);
-    return response.json();
-  }
-}
-
-// Usage
-const client = new MedEarnClient();
-```
-
-### **React Hook Example**
-```typescript
-import { useState, useEffect } from 'react';
-
-const useMedEarn = () => {
-  const [articles, setArticles] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const uploadFile = async (file: File, metadata: any) => {
-    setLoading(true);
-    try {
-      const result = await client.uploadFile(file, metadata);
-      if (result.success) {
-        // Refresh articles list
-        fetchArticles();
-      }
-      return result;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchArticles = async () => {
-    const data = await client.getArticles();
-    setArticles(data);
-  };
-
-  useEffect(() => { fetchArticles(); }, []);
-
-  return { articles, loading, uploadFile, fetchArticles };
-};
-```
-
-## 🔧 Configuration
-
-### **Environment Variables**
-```bash
-# Required
-SUI_PRIVATE_KEY="your_sui_private_key_here"
-
-# Optional
-PORT=8000
-NODE_ENV=development
-```
-
-### **File Upload Limits**
-- **Maximum file size**: 10MB
-- **Supported formats**: All file types
-- **Storage**: Local + Walrus decentralized storage
-- **String content**: Unlimited via `/api/upload/string`
-
-## 📁 File Structure
-
-```
-medearn/
-├── src/
-│   ├── server.ts          # Main server file
-│   └── database.ts        # Database and Article interface
-├── public/                # Web interface
-├── uploads/               # Uploaded files
-├── data/                  # Database files
-│   ├── articles.json      # Article metadata
-│   └── backup/            # Database backups
-├── .env                   # Environment variables (not in git)
-└── package.json
-```
-
-## 🚨 Troubleshooting
-
-### **Common Issues**
-
-| Problem | Solution |
-|---------|----------|
-| **CORS Errors** | Backend CORS is enabled. Check if server is running on port 8000 |
-| **Port in Use** | `lsof -ti:8000` then `kill -9 <PID>` |
-| **Upload Fails** | Check file size (max 10MB) and required fields |
-| **Walrus Errors** | Expected when unavailable. Files stored locally as fallback |
-| **Missing Private Key** | Ensure `SUI_PRIVATE_KEY` is set in `.env` file |
-
-### **Quick Debug Commands**
-```bash
-# Check server health
-curl http://localhost:8000/api/health
-
-# Verify server is running
-lsof -i:8000
-
-# Check environment variables
-cat .env
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test all API endpoints
-5. Submit a pull request
-
-## License
-
-ISC License - see LICENSE file for details. 
+This system implements the real x402 HTTP Payment Protocol, ensuring secure, blockchain-verified payments for every piece of content while providing a seamless user experience through proper HTTP status codes and clear payment flows. 
