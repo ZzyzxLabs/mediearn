@@ -35,8 +35,8 @@ print_error() {
 # Check if server is running
 check_server() {
     print_status "Checking if MedEarn server is running..."
-    if curl -s http://localhost:3000/api/health > /dev/null 2>&1; then
-        print_success "Server is running on port 3000"
+    if curl -s http://localhost:8000/api/health > /dev/null 2>&1; then
+        print_success "Server is running on port 8000"
         return 0
     else
         print_error "Server is not running. Please start the server first with 'npm start'"
@@ -50,17 +50,17 @@ cleanup_database() {
     print_status "Step 1: Cleaning up existing articles..."
     
     # Get current articles count
-    current_count=$(curl -s http://localhost:3000/api/articles | jq 'length')
+    current_count=$(curl -s http://localhost:8000/api/articles | jq 'length')
     print_status "Current articles in database: $current_count"
     
     if [ "$current_count" -gt 0 ]; then
         print_status "Deleting all existing articles..."
         
         # Get all article IDs and delete them
-        curl -s http://localhost:3000/api/articles | jq -r '.[].id' | while read -r id; do
+        curl -s http://localhost:8000/api/articles | jq -r '.[].id' | while read -r id; do
             if [ ! -z "$id" ]; then
                 print_status "Deleting article ID: $id"
-                curl -X DELETE "http://localhost:3000/api/articles/$id" > /dev/null 2>&1
+                curl -X DELETE "http://localhost:8000/api/articles/$id" > /dev/null 2>&1
                 if [ $? -eq 0 ]; then
                     print_success "Deleted article $id"
                 else
@@ -71,7 +71,7 @@ cleanup_database() {
         
         # Verify cleanup
         sleep 2
-        new_count=$(curl -s http://localhost:3000/api/articles | jq 'length')
+        new_count=$(curl -s http://localhost:8000/api/articles | jq 'length')
         if [ "$new_count" -eq 0 ]; then
             print_success "Database cleaned successfully (0 articles remaining)"
         else
@@ -97,7 +97,7 @@ EOF
 
     # Upload article 1
     print_status "Uploading test-article-1.txt..."
-    response1=$(curl -s -X POST -F "content=@test-article-1.txt" http://localhost:3000/api/upload)
+    response1=$(curl -s -X POST -F "content=@test-article-1.txt" http://localhost:8000/api/upload)
     article1_id=$(echo "$response1" | jq -r '.article.id')
     
     if [ "$article1_id" != "null" ] && [ "$article1_id" != "" ]; then
@@ -118,7 +118,7 @@ EOF
 
     # Upload article 2
     print_status "Uploading test-article-2.txt..."
-    response2=$(curl -s -X POST -F "content=@test-article-2.txt" http://localhost:3000/api/upload)
+    response2=$(curl -s -X POST -F "content=@test-article-2.txt" http://localhost:8000/api/upload)
     article2_id=$(echo "$response2" | jq -r '.article.id')
     
     if [ "$article2_id" != "null" ] && [ "$article2_id" != "" ]; then
@@ -140,7 +140,7 @@ test_articles_preview() {
     print_status "Step 3: Testing articles preview with detailed display..."
     
     print_status "Fetching all articles preview..."
-    preview_response=$(curl -s http://localhost:3000/api/articles/preview)
+    preview_response=$(curl -s http://localhost:8000/api/articles/preview)
     article_count=$(echo "$preview_response" | jq 'length')
     
     print_success "Found $article_count articles"
@@ -156,13 +156,13 @@ test_ownership() {
     print_status "Step 4: Testing ownership functionality..."
     
     # Get the owner address from the first article
-    owner_address=$(curl -s http://localhost:3000/api/articles | jq -r '.[0].owner.suiAddress')
+    owner_address=$(curl -s http://localhost:8000/api/articles | jq -r '.[0].owner.suiAddress')
     
     if [ "$owner_address" != "null" ] && [ "$owner_address" != "" ]; then
         print_status "Testing ownership for address: $owner_address"
         
         # Get articles by owner
-        owned_articles=$(curl -s "http://localhost:3000/api/articles/owner/$owner_address")
+        owned_articles=$(curl -s "http://localhost:8000/api/articles/owner/$owner_address")
         owned_count=$(echo "$owned_articles" | jq 'length')
         
         print_success "Found $owned_count articles owned by this address"
@@ -182,19 +182,19 @@ test_search() {
     
     # Test search for "test"
     print_status "Searching for 'test'..."
-    test_results=$(curl -s "http://localhost:3000/api/articles/search?q=test")
+    test_results=$(curl -s "http://localhost:8000/api/articles/search?q=test")
     test_count=$(echo "$test_results" | jq 'length')
     print_success "Found $test_count articles matching 'test'"
     
     # Test search for "article"
     print_status "Searching for 'article'..."
-    article_results=$(curl -s "http://localhost:3000/api/articles/search?q=article")
+    article_results=$(curl -s "http://localhost:8000/api/articles/search?q=article")
     article_count=$(echo "$article_results" | jq 'length')
     print_success "Found $article_count articles matching 'article'"
     
     # Test search for "walrus"
     print_status "Searching for 'walrus'..."
-    walrus_results=$(curl -s "http://localhost:3000/api/articles/search?q=walrus")
+    walrus_results=$(curl -s "http://localhost:8000/api/articles/search?q=walrus")
     walrus_count=$(echo "$walrus_results" | jq 'length')
     print_success "Found $walrus_count articles matching 'walrus'"
 }
@@ -204,7 +204,7 @@ test_statistics() {
     echo ""
     print_status "Step 6: Testing database statistics..."
     
-    stats=$(curl -s http://localhost:3000/api/stats)
+    stats=$(curl -s http://localhost:8000/api/stats)
     
     print_success "Database Statistics:"
     echo "$stats" | jq -r '
@@ -227,7 +227,7 @@ test_individual_articles() {
     
     if [ ! -z "$article1_id" ]; then
         print_status "Retrieving article 1 (ID: $article1_id)..."
-        article1=$(curl -s "http://localhost:3000/api/articles/$article1_id")
+        article1=$(curl -s "http://localhost:8000/api/articles/$article1_id")
         if [ $? -eq 0 ]; then
             print_success "Article 1 retrieved successfully"
             echo "$article1" | jq -r '"   📄 " + .fileName + " - " + (.walrus.overallStatus | tostring) + " - " + (.local.fileSize | tostring) + " bytes"'
@@ -238,7 +238,7 @@ test_individual_articles() {
     
     if [ ! -z "$article2_id" ]; then
         print_status "Retrieving article 2 (ID: $article2_id)..."
-        article2=$(curl -s "http://localhost:3000/api/articles/$article2_id")
+        article2=$(curl -s "http://localhost:8000/api/articles/$article2_id")
         if [ $? -eq 0 ]; then
             print_success "Article 2 retrieved successfully"
             echo "$article2" | jq -r '"   📄 " + .fileName + " - " + (.walrus.overallStatus | tostring) + " - " + (.local.fileSize | tostring) + " bytes"'
@@ -253,7 +253,7 @@ test_public_articles() {
     echo ""
     print_status "Step 8: Testing public articles endpoint..."
     
-    public_articles=$(curl -s http://localhost:3000/api/articles/public)
+    public_articles=$(curl -s http://localhost:8000/api/articles/public)
     public_count=$(echo "$public_articles" | jq 'length')
     
     print_success "Found $public_count public articles"
@@ -268,7 +268,7 @@ test_health_check() {
     echo ""
     print_status "Step 9: Testing health check endpoint..."
     
-    health=$(curl -s http://localhost:3000/api/health)
+    health=$(curl -s http://localhost:8000/api/health)
     
     print_success "Health Check:"
     echo "$health" | jq -r '

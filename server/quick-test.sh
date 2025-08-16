@@ -13,7 +13,7 @@ NC='\033[0m'
 
 # Check server
 echo -e "${BLUE}Checking server status...${NC}"
-if curl -s http://localhost:3000/api/health > /dev/null 2>&1; then
+if curl -s http://localhost:8000/api/health > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Server is running${NC}"
 else
     echo "❌ Server is not running. Start with 'npm start'"
@@ -38,7 +38,7 @@ case $choice in
         echo ""
         echo "📄 All Articles Preview:"
         echo "========================"
-        curl -s http://localhost:3000/api/articles/preview | jq -r '.[] | "📄 Article Details:" + "\n" + "   ID: " + .id + "\n" + "   File: " + .fileName + "\n" + "   Size: " + (.originalFileSize | tostring) + " bytes\n" + "   Upload: " + .uploadDate + "\n" + "   Owner: " + .owner.suiAddress + "\n" + "   Public: " + (.owner.isPublic | tostring) + "\n" + "   Tags: [" + (.tags | join(", ")) + "]\n" + "   Version: " + .version + "\n" + "---"'
+        curl -s http://localhost:8000/api/articles/preview | jq -r '.[] | "📄 Article Details:" + "\n" + "   ID: " + .id + "\n" + "   File: " + .fileName + "\n" + "   Size: " + (.originalFileSize | tostring) + " bytes\n" + "   Upload: " + .uploadDate + "\n" + "   Owner: " + .owner.suiAddress + "\n" + "   Public: " + (.owner.isPublic | tostring) + "\n" + "   Tags: [" + (.tags | join(", ")) + "]\n" + "   Version: " + .version + "\n" + "---"'
         ;;
     2)
         echo ""
@@ -46,7 +46,7 @@ case $choice in
         echo "==============="
         read -p "Enter search term: " search_term
         echo "Searching for: '$search_term'"
-        results=$(curl -s "http://localhost:3000/api/articles/search?q=$search_term")
+        results=$(curl -s "http://localhost:8000/api/articles/search?q=$search_term")
         count=$(echo "$results" | jq 'length')
         echo "Found $count results:"
         echo "$results" | jq -r '.[] | "   📄 " + .fileName + " (ID: " + .id + ")"'
@@ -55,7 +55,7 @@ case $choice in
         echo ""
         echo "📊 Database Statistics:"
         echo "======================="
-        stats=$(curl -s http://localhost:3000/api/stats)
+        stats=$(curl -s http://localhost:8000/api/stats)
         echo "$stats" | jq -r '
             "📊 Total Articles: " + (.totalArticles | tostring) + "\n" +
             "💾 Total Size: " + (.totalSize | tostring) + " bytes\n" +
@@ -68,10 +68,10 @@ case $choice in
         echo ""
         echo "👤 Ownership Test:"
         echo "=================="
-        owner_address=$(curl -s http://localhost:3000/api/articles | jq -r '.[0].owner.suiAddress')
+        owner_address=$(curl -s http://localhost:8000/api/articles | jq -r '.[0].owner.suiAddress')
         if [ "$owner_address" != "null" ] && [ "$owner_address" != "" ]; then
             echo "Testing ownership for: $owner_address"
-            owned=$(curl -s "http://localhost:3000/api/articles/owner/$owner_address")
+            owned=$(curl -s "http://localhost:8000/api/articles/owner/$owner_address")
             count=$(echo "$owned" | jq 'length')
             echo "Found $count owned articles:"
             echo "$owned" | jq -r '.[] | "   📁 " + .fileName + " (ID: " + .id + ", Walrus: " + .walrus.overallStatus + ")"'
@@ -83,7 +83,7 @@ case $choice in
         echo ""
         echo "🟢 Health Check:"
         echo "================="
-        health=$(curl -s http://localhost:3000/api/health)
+        health=$(curl -s http://localhost:8000/api/health)
         echo "$health" | jq -r '
             "🟢 Status: " + .status + "\n" +
             "🕒 Timestamp: " + .timestamp + "\n" +
@@ -101,12 +101,12 @@ case $choice in
         echo ""
         echo "📄 All Articles Preview:"
         echo "========================"
-        curl -s http://localhost:3000/api/articles/preview | jq -r '.[] | "📄 Article Details:" + "\n" + "   ID: " + .id + "\n" + "   File: " + .fileName + "\n" + "   Size: " + (.originalFileSize | tostring) + " bytes\n" + "   Upload: " + .uploadDate + "\n" + "   Owner: " + .owner.suiAddress + "\n" + "   Public: " + (.owner.isPublic | tostring) + "\n" + "   Tags: [" + (.tags | join(", ")) + "]\n" + "   Version: " + .version + "\n" + "---"'
+        curl -s http://localhost:8000/api/articles/preview | jq -r '.[] | "📄 Article Details:" + "\n" + "   ID: " + .id + "\n" + "   File: " + .fileName + "\n" + "   Size: " + (.originalFileSize | tostring) + " bytes\n" + "   Upload: " + .uploadDate + "\n" + "   Owner: " + .owner.suiAddress + "\n" + "   Public: " + (.owner.isPublic | tostring) + "\n" + "   Tags: [" + (.tags | join(", ")) + "]\n" + "   Version: " + .version + "\n" + "---"'
         
         echo ""
         echo "🔍 Search Test (test):"
         echo "======================"
-        test_results=$(curl -s "http://localhost:3000/api/articles/search?q=test")
+        test_results=$(curl -s "http://localhost:8000/api/articles/search?q=test")
         test_count=$(echo "$test_results" | jq 'length')
         echo "Found $test_count results for 'test':"
         echo "$test_results" | jq -r '.[] | "   📄 " + .fileName + " (ID: " + (.id | tostring) + ")"'
@@ -114,7 +114,7 @@ case $choice in
         echo ""
         echo "📊 Database Statistics:"
         echo "======================="
-        stats=$(curl -s http://localhost:3000/api/stats)
+        stats=$(curl -s http://localhost:8000/api/stats)
         echo "$stats" | jq -r '
             "📊 Total Articles: " + (.totalArticles | tostring) + "\n" +
             "💾 Total Size: " + (.totalSize | tostring) + " bytes\n" +
@@ -126,10 +126,10 @@ case $choice in
         echo ""
         echo "👤 Ownership Test:"
         echo "=================="
-        owner_address=$(curl -s http://localhost:3000/api/articles | jq -r '.[0].owner.suiAddress')
+        owner_address=$(curl -s http://localhost:8000/api/articles | jq -r '.[0].owner.suiAddress')
         if [ "$owner_address" != "null" ] && [ "$owner_address" != "" ]; then
             echo "Testing ownership for: $owner_address"
-            owned=$(curl -s "http://localhost:3000/api/articles/owner/$owner_address")
+            owned=$(curl -s "http://localhost:8000/api/articles/owner/$owner_address")
             count=$(echo "$owned" | jq 'length')
             echo "Found $count owned articles:"
             echo "$owned" | jq -r '.[] | "   📁 " + .fileName + " (ID: " + .id + ", Walrus: " + .walrus.overallStatus + ")"'
@@ -140,7 +140,7 @@ case $choice in
         echo ""
         echo "🟢 Health Check:"
         echo "================="
-        health=$(curl -s http://localhost:3000/api/health)
+        health=$(curl -s http://localhost:8000/api/health)
         echo "$health" | jq -r '
             "🟢 Status: " + .status + "\n" +
             "🕒 Timestamp: " + .timestamp + "\n" +
