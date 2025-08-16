@@ -209,7 +209,6 @@ app.post('/api/upload', async (req, res) => {
             }
 
             // Create blob info with preview text stored locally and content blob ID from Walrus
-            // Use the Walrus blobId as the local ID for consistency
             blobInfo = blobStorage.createBlob({
                 title: title,
                 ownerAddress: ownerAddress,
@@ -225,7 +224,7 @@ app.post('/api/upload', async (req, res) => {
                     },
                     overallStatus: 'success'
                 }
-            }, contentBlobId); // Pass Walrus blobId as custom ID
+            });
 
         } catch (walrusError) {
             console.error('❌ Walrus upload failed:', walrusError);

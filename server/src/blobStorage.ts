@@ -67,14 +67,15 @@ export class BlobStorage {
         }
     }
 
-    createBlob(blobData: Omit<BlobInfo, 'id' | 'uploadDate'>, blobId: string): BlobInfo {
+    createBlob(blobData: Omit<BlobInfo, 'id' | 'uploadDate'>): BlobInfo {
+        const id = Date.now().toString();
         const blob: BlobInfo = {
             ...blobData,
-            id: blobId, // Use the provided blobId as the local ID
+            id,
             uploadDate: new Date().toISOString()
         };
 
-        this.blobs.set(blobId, blob);
+        this.blobs.set(id, blob);
         this.saveBlobInfo();
         return blob;
     }
