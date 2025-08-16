@@ -18,8 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { wrapFetchWithPayment, decodeXPaymentResponse } from "x402-fetch";
 
-import { apiClient, ArticleMetadata } from "@/lib/api";
 import { web3 } from "@/lib/coinbase";
+import { privateKeyToAccount } from "viem/accounts";
 
 const formSchema = z.object({
   file: z
@@ -54,6 +54,7 @@ export function UploadForm() {
   });
 
   const onSubmit = async (data: FormData) => {
+    console.log("test started");
     setUploading(true);
     setMessage("");
 
@@ -73,19 +74,53 @@ export function UploadForm() {
         title: data.title.trim(),
         content: content,
         ownerAddress: userAddress,
-        isPublic: true,
+        description: data.description || "",
       };
 
-      // Call the API directly to the backend server
-      const response = await fetch("http://localhost:8000/api/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const hardCodedPrivateKey =
+        "0x21f6ad4a9bcab0cf664e19f0cf0682aad455f43de3721710a1ea50519017b218";
+      const hardCodedAccount = privateKeyToAccount(hardCodedPrivateKey);
+      // Create fetchWithPayment wrapper with proper configuration
+      const fetchWithPayment = wrapFetchWithPayment(fetch, hardCodedAccount);
+
+      console.log("Making upload request with payment...", {
+        url: "http://localhost:8000/api/upload",
+        userAddress,
+        uploadData: {
+          ...uploadData,
+          content: `${uploadData.content.substring(0, 100)}...`,
         },
-        body: JSON.stringify(uploadData),
+      });
+
+      // Make the upload request with payment handling
+      const response = await fetchWithPayment(
+        "http://localhost:8000/api/upload",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(uploadData),
+        }
+      );
+
+      console.log("Response received:", {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
       });
 
       if (!response.ok) {
+        // Handle 402 Payment Required specifically
+        if (response.status === 402) {
+          const errorData = await response.json();
+          throw new Error(
+            `Payment required: ${
+              errorData.error || "Please complete payment to upload"
+            }`
+          );
+        }
+
         const errorData = await response.json();
         throw new Error(errorData.error || "Upload failed");
       }
@@ -95,12 +130,29 @@ export function UploadForm() {
       // Decode payment response if present
       const paymentResponseHeader = response.headers.get("x-payment-response");
       if (paymentResponseHeader) {
-        const paymentResponse = decodeXPaymentResponse(paymentResponseHeader);
-        console.log("Payment response:", paymentResponse);
+        try {
+          const paymentResponse = decodeXPaymentResponse(paymentResponseHeader);
+          console.log("Payment response:", paymentResponse);
+
+          // Add payment info to success message
+          if (result.success) {
+            setMessage(
+              `✅ Article uploaded successfully! Payment: ${
+                paymentResponse.transaction || "Completed"
+              }`
+            );
+          }
+        } catch (paymentError) {
+          console.error("Error decoding payment response:", paymentError);
+          if (result.success) {
+            setMessage("✅ Article uploaded successfully! (Payment completed)");
+          }
+        }
+      } else if (result.success) {
+        setMessage("✅ Article uploaded successfully!");
       }
 
       if (result.success) {
-        setMessage("✅ Article uploaded successfully!");
         // Reset form
         form.reset();
         // Reset file input
@@ -111,11 +163,19 @@ export function UploadForm() {
       } else {
         setMessage(`❌ Upload failed: ${result.error}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Upload error:", error);
-      setMessage(
-        `❌ Error: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
+
+      // Handle specific payment errors
+      if (error.response?.data?.error) {
+        setMessage(`❌ Payment Error: ${error.response.data.error}`);
+      } else {
+        setMessage(
+          `❌ Error: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
+      }
     } finally {
       setUploading(false);
     }

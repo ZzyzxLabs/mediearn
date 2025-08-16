@@ -10,38 +10,52 @@ export interface UploadRequest {
   title: string;
   content: string;
   ownerAddress: string;
-  isPublic?: boolean;
+  description?: string;
 }
 
-export interface Article {
-  id: string;
-  title?: string;
-  description?: string;
-  category?: string;
-  ownerAddress?: string;
-  previewBlob?: string;
-  contentBlob?: string;
-  createdAt?: string;
-  fileName?: string;
-  originalFileSize?: number;
-  uploadDate?: string;
-  lastModified?: string;
-  version?: string;
-  tags?: string[];
-  author?: string;
-  owner?: {
-    suiAddress: string;
+export interface ArticlePreview {
+  blobId: string;
+  title: string;
+  description: string;
+  ownerAddress: string;
+  uploadDate: string;
+  paymentRequired: boolean;
+  paymentDetails: {
+    price: string;
+    currency: string;
+    network: string;
+  };
+}
+
+export interface ArticleContent {
+  blobId: string;
+  title: string;
+  content: string;
+  metadata: {
+    uploadDate: string;
+    ownerAddress: string;
     isPublic: boolean;
-    transferable: boolean;
+    paymentInfo?: Record<string, unknown>;
   };
 }
 
 export interface UploadResponse {
   success: boolean;
-  articleId?: string;
-  error?: string;
   message?: string;
+  error?: string;
   blobInfo?: Record<string, unknown>;
+}
+
+export interface HealthResponse {
+  status: string;
+  timestamp: string;
+  message: string;
+  walrusStatus: string;
+  suiNetwork: string;
+  database: {
+    totalBlobs: number;
+    lastUpdated: string;
+  };
 }
 
 class ApiClient {
@@ -52,9 +66,12 @@ class ApiClient {
   }
 
   // Health check
-  async checkHealth() {
+  async checkHealth(): Promise<HealthResponse> {
     try {
       const response = await fetch(`${this.baseUrl}/api/health`);
+      if (!response.ok) {
+        throw new Error("Health check failed");
+      }
       return await response.json();
     } catch (error) {
       console.error("Health check failed:", error);
@@ -76,7 +93,7 @@ class ApiClient {
         title: metadata.title,
         content: content,
         ownerAddress: ownerAddress,
-        isPublic: true, // Default to public
+        description: metadata.description,
       };
 
       const response = await fetch(`${this.baseUrl}/api/upload`, {
@@ -103,97 +120,33 @@ class ApiClient {
     }
   }
 
-  // Get all articles (now blobs)
-  async getArticles(): Promise<Article[]> {
+  // Get blob previews (matches server endpoint)
+  async getBlobPreviews(): Promise<ArticlePreview[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/blobs`);
+      const response = await fetch(`${this.baseUrl}/api/blobs/preview`);
       if (!response.ok) {
-        throw new Error("Failed to fetch articles");
+        throw new Error("Failed to fetch blob previews");
       }
       return await response.json();
     } catch (error) {
-      console.error("Failed to fetch articles:", error);
+      console.error("Failed to fetch blob previews:", error);
       return [];
     }
   }
 
-  // Get article by ID (now blob by ID)
-  async getArticle(id: string): Promise<Article | null> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/blobs/${id}`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch article");
-      }
-      return await response.json();
-    } catch (error) {
-      console.error("Failed to fetch article:", error);
-      return null;
-    }
-  }
-
-  // Get articles by owner address
-  async getArticlesByOwner(address: string): Promise<Article[]> {
+  // Get blob content (matches server endpoint with userAddress parameter)
+  async getBlobContent(
+    id: string,
+    userAddress: string
+  ): Promise<ArticleContent | null> {
     try {
       const response = await fetch(
-        `${this.baseUrl}/api/blobs/owner/${address}`
+        `${
+          this.baseUrl
+        }/api/blobs/${id}/content?userAddress=${encodeURIComponent(
+          userAddress
+        )}`
       );
-      if (!response.ok) {
-        throw new Error("Failed to fetch owner articles");
-      }
-      return await response.json();
-    } catch (error) {
-      console.error("Failed to fetch owner articles:", error);
-      return [];
-    }
-  }
-
-  // Get public articles
-  async getPublicArticles(): Promise<Article[]> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/blobs/public`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch public articles");
-      }
-      return await response.json();
-    } catch (error) {
-      console.error("Failed to fetch public articles:", error);
-      return [];
-    }
-  }
-
-  // Search articles
-  async searchArticles(query: string): Promise<Article[]> {
-    try {
-      const response = await fetch(
-        `${this.baseUrl}/api/blobs/search?q=${encodeURIComponent(query)}`
-      );
-      if (!response.ok) {
-        throw new Error("Failed to search articles");
-      }
-      return await response.json();
-    } catch (error) {
-      console.error("Failed to search articles:", error);
-      return [];
-    }
-  }
-
-  // Delete article
-  async deleteArticle(id: string): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/blobs/${id}`, {
-        method: "DELETE",
-      });
-      return response.ok;
-    } catch (error) {
-      console.error("Failed to delete article:", error);
-      return false;
-    }
-  }
-
-  // Get blob content from Walrus
-  async getBlobContent(id: string): Promise<Record<string, unknown> | null> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/blobs/${id}/content`);
       if (!response.ok) {
         throw new Error("Failed to fetch blob content");
       }
@@ -204,17 +157,16 @@ class ApiClient {
     }
   }
 
-  // Get blob previews
-  async getBlobPreviews(): Promise<Record<string, unknown>[]> {
+  // Delete blob
+  async deleteBlob(id: string): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/blobs/preview`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch blob previews");
-      }
-      return await response.json();
+      const response = await fetch(`${this.baseUrl}/api/blobs/${id}`, {
+        method: "DELETE",
+      });
+      return response.ok;
     } catch (error) {
-      console.error("Failed to fetch blob previews:", error);
-      return [];
+      console.error("Failed to delete blob:", error);
+      return false;
     }
   }
 }

@@ -6,22 +6,7 @@ import { Loader2, FileText } from "lucide-react";
 import Link from "next/link";
 import { ArticleCard } from "@/components/articleCard";
 import { ArticleDetailCard } from "@/components/articleDetailCard";
-
-interface ArticlePreview {
-  blobId: string;
-  previewText: string;
-}
-
-interface ArticleContent {
-  blobId: string;
-  title: string;
-  content: string;
-  metadata: {
-    uploadDate: string;
-    ownerAddress: string;
-    isPublic: boolean;
-  };
-}
+import { apiClient, ArticlePreview, ArticleContent } from "@/lib/api";
 
 export default function HomePage() {
   const [articles, setArticles] = useState<ArticlePreview[]>([]);
@@ -36,11 +21,7 @@ export default function HomePage() {
   const fetchArticles = async () => {
     try {
       setLoading(true);
-      const response = await fetch("http://localhost:8000/api/blobs/preview");
-      if (!response.ok) {
-        throw new Error("Failed to fetch articles");
-      }
-      const data = await response.json();
+      const data = await apiClient.getBlobPreviews();
       setArticles(data);
     } catch (error) {
       setError("Failed to load articles");
@@ -56,17 +37,15 @@ export default function HomePage() {
       setLoadingContent(true);
       setError(null); // Clear any previous errors
 
-      const response = await fetch(
-        `http://localhost:8000/api/blobs/${blobId}/content`
-      );
+      // Get user's address from web3 (you'll need to implement this)
+      const userAddress = "0x1234...5678"; // Mock address for now
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to fetch article content");
+      const data = await apiClient.getBlobContent(blobId, userAddress);
+      if (data) {
+        setSelectedArticle(data);
+      } else {
+        throw new Error("Failed to fetch article content");
       }
-
-      const data = await response.json();
-      setSelectedArticle(data);
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -123,8 +102,8 @@ export default function HomePage() {
     <div className='min-h-screen'>
       <div className='container mx-auto px-4 py-8'>
         {/* Header */}
-        <div className='mb-8 flex items-center gap-4'>
-          <h1 className='text-4xl font-bold'>Articles</h1>
+        <div className='mb-8'>
+          <h1 className='text-4xl font-bold mb-2'>Articles</h1>
           <p className='text-muted-foreground mt-3'>
             Discover articles stored on decentralized Walrus storage
           </p>
@@ -150,7 +129,7 @@ export default function HomePage() {
                   <ArticleCard
                     key={article.blobId}
                     blobId={article.blobId}
-                    previewText={article.previewText}
+                    previewText={`${article.title}\n\n${article.description}`}
                     onClick={fetchArticleContent}
                   />
                 ))}

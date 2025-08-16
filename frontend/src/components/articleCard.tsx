@@ -40,6 +40,13 @@ export function ArticleCard({
 
   // Parse preview text to extract title and description
   const parsePreviewText = (previewText: string) => {
+    if (!previewText) {
+      return {
+        title: "Untitled",
+        description: null,
+      };
+    }
+
     const lines = previewText.split("\n");
     const title = lines[0] || "Untitled";
     const description = lines.slice(2).join("\n").trim();
@@ -56,6 +63,10 @@ export function ArticleCard({
 
   // Extract metadata from preview text
   const extractMetadata = (previewText: string) => {
+    if (!previewText) {
+      return { title: "Untitled", uploadDate: "Recent", tags: [] };
+    }
+
     const lines = previewText.split("\n");
     const title = lines[0] || "Untitled";
 
