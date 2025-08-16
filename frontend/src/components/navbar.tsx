@@ -28,8 +28,8 @@ export function Navbar() {
   }, []);
 
   return (
-    <nav className='sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60'>
-      <div className='w-full flex h-14 items-center justify-between px-6'>
+    <nav className='fixed top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 h-16'>
+      <div className='w-full flex h-16 items-center justify-between px-6'>
         {/* Left side - Brand */}
         <div className='flex items-center'>
           <Link href='/' className='flex items-center'>
