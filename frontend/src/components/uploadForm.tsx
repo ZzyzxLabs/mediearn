@@ -1,139 +1,108 @@
 "use client";
 
 import { useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import { apiClient, ArticleMetadata } from "@/lib/api";
 import {
-  uploadTransactionManager,
-  BASE_SEPOLIA_CONFIG,
-} from "@/lib/transactions";
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { wrapFetchWithPayment, decodeXPaymentResponse } from "x402-fetch";
+
+import { apiClient, ArticleMetadata } from "@/lib/api";
 import { web3 } from "@/lib/coinbase";
 
+const formSchema = z.object({
+  file: z
+    .instanceof(File, { message: "Please select a file" })
+    .refine((file) => file.size > 0, "File cannot be empty")
+    .refine(
+      (file) => file.size <= 10 * 1024 * 1024,
+      "File size must be less than 10MB"
+    ),
+  title: z
+    .string()
+    .min(1, "Title is required")
+    .max(100, "Title must be less than 100 characters"),
+  description: z
+    .string()
+    .max(500, "Description must be less than 500 characters")
+    .optional(),
+});
+
+type FormData = z.infer<typeof formSchema>;
+
 export function UploadForm() {
-  const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("medical");
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
-  const [processingPayment, setProcessingPayment] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setMessage("");
-    }
-  };
+  const form = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      title: "",
+      description: "",
+    },
+  });
 
-  const checkNetworkAndBalance = async () => {
-    try {
-      // Check if wallet is connected
-      const accounts = await web3.eth.getAccounts();
-      if (!accounts || accounts.length === 0) {
-        throw new Error("Please connect your wallet first");
-      }
-
-      const userAddress = accounts[0];
-
-      // Check if on correct network
-      const chainId = await web3.eth.getChainId();
-      const expectedChainId = parseInt(BASE_SEPOLIA_CONFIG.chainId, 16);
-      if (chainId !== BigInt(expectedChainId)) {
-        throw new Error(
-          `Please switch to ${BASE_SEPOLIA_CONFIG.chainName} network`
-        );
-      }
-
-      // Check user balance
-      const balanceInfo = await uploadTransactionManager.checkUserBalance(
-        userAddress
-      );
-      if (!balanceInfo.hasEnoughBalance) {
-        throw new Error(
-          `Insufficient balance. You have ${balanceInfo.balance} ETH, but need ${balanceInfo.requiredFee} ETH for upload`
-        );
-      }
-
-      return userAddress;
-    } catch (error) {
-      throw error;
-    }
-  };
-
-  const processPayment = async (userAddress: string) => {
-    try {
-      setProcessingPayment(true);
-      setMessage("Processing payment...");
-
-      // Create file hash (simple hash for demo - in production use proper hashing)
-      const fileHash = `${file?.name}-${Date.now()}`;
-
-      const paymentResult =
-        await uploadTransactionManager.sendUploadTransaction({
-          fileHash,
-          fileName: file?.name || "",
-          userAddress,
-        });
-
-      if (!paymentResult.success) {
-        throw new Error(paymentResult.error || "Payment failed");
-      }
-
-      setMessage(
-        `✅ Payment successful! Transaction: ${paymentResult.transactionHash}`
-      );
-      return paymentResult.transactionHash;
-    } catch (error) {
-      throw error;
-    } finally {
-      setProcessingPayment(false);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!file) {
-      setMessage("Please select a file");
-      return;
-    }
-
-    if (!title.trim()) {
-      setMessage("Please enter a title");
-      return;
-    }
-
+  const onSubmit = async (data: FormData) => {
     setUploading(true);
     setMessage("");
 
     try {
-      // Step 1: Check network and balance
-      const userAddress = await checkNetworkAndBalance();
+      // Get user's address from web3
+      const accounts = await web3.eth.getAccounts();
+      if (!accounts || accounts.length === 0) {
+        throw new Error("Please connect your wallet first");
+      }
+      const userAddress = accounts[0];
 
-      // Step 2: Process payment
-      const transactionHash = await processPayment(userAddress);
+      // Read file content as text
+      const content = await data.file.text();
 
-      // Step 3: Upload file to server
-      setMessage("Payment successful! Uploading file...");
-
-      const metadata: ArticleMetadata = {
-        title: title.trim(),
-        description: description.trim(),
-        category: category,
+      // Prepare upload data
+      const uploadData = {
+        title: data.title.trim(),
+        content: content,
+        ownerAddress: userAddress,
+        isPublic: true,
       };
 
-      const result = await apiClient.uploadArticle(file, metadata);
+      // Call the API directly to the backend server
+      const response = await fetch("http://localhost:8000/api/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(uploadData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Upload failed");
+      }
+
+      const result = await response.json();
+
+      // Decode payment response if present
+      const paymentResponseHeader = response.headers.get("x-payment-response");
+      if (paymentResponseHeader) {
+        const paymentResponse = decodeXPaymentResponse(paymentResponseHeader);
+        console.log("Payment response:", paymentResponse);
+      }
 
       if (result.success) {
-        setMessage(
-          `✅ Article uploaded successfully! Payment: ${transactionHash}`
-        );
+        setMessage("✅ Article uploaded successfully!");
         // Reset form
-        setFile(null);
-        setTitle("");
-        setDescription("");
-        setCategory("medical");
+        form.reset();
         // Reset file input
         const fileInput = document.getElementById(
           "file-input"
@@ -143,6 +112,7 @@ export function UploadForm() {
         setMessage(`❌ Upload failed: ${result.error}`);
       }
     } catch (error) {
+      console.error("Upload error:", error);
       setMessage(
         `❌ Error: ${error instanceof Error ? error.message : "Unknown error"}`
       );
@@ -152,128 +122,102 @@ export function UploadForm() {
   };
 
   return (
-    <div className='max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md'>
-      <h2 className='text-2xl font-bold mb-6'>Upload Article</h2>
-
-      {/* Payment Info */}
-      <div className='mb-6 p-4 bg-blue-50 rounded-lg'>
-        <h3 className='font-semibold text-blue-900 mb-2'>Upload Fee</h3>
-        <p className='text-sm text-blue-700'>
-          Upload fee: 0.001 ETH on Base Sepolia network
-        </p>
-        <p className='text-xs text-blue-600 mt-1'>
-          Make sure your wallet is connected and you have sufficient balance
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className='space-y-4'>
-        {/* File Upload */}
-        <div>
-          <label
-            htmlFor='file-input'
-            className='block text-sm font-medium text-gray-700 mb-2'
-          >
-            Article File
-          </label>
-          <input
-            id='file-input'
-            type='file'
-            onChange={handleFileChange}
-            accept='.txt,.md,.pdf,.doc,.docx'
-            className='block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100'
+    <div className='max-w-xl mx-auto p-6 border bg-card rounded-xl text-card-foreground shadow @container/card'>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6'>
+          {/* File Upload */}
+          <FormField
+            control={form.control}
+            name='file'
+            render={({ field: { onChange, value, ...field } }) => (
+              <FormItem>
+                <FormLabel>Article File</FormLabel>
+                <FormControl>
+                  <Input
+                    id='file-input'
+                    type='file'
+                    accept='.txt,.md,.pdf,.doc,.docx'
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        onChange(file);
+                        setMessage("");
+                      }
+                    }}
+                    className='file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100'
+                    {...field}
+                  />
+                </FormControl>
+                {value && (
+                  <FormDescription>
+                    Selected: {value.name} ({(value.size / 1024).toFixed(1)} KB)
+                  </FormDescription>
+                )}
+                <FormMessage />
+              </FormItem>
+            )}
           />
-          {file && (
-            <p className='mt-1 text-sm text-gray-600'>
-              Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
-            </p>
+
+          {/* Title Input */}
+          <FormField
+            control={form.control}
+            name='title'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Title</FormLabel>
+                <FormControl>
+                  <Input placeholder='Enter article title' {...field} />
+                </FormControl>
+                <FormDescription>
+                  A descriptive title for your article (max 100 characters)
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {/* Description Input */}
+          <FormField
+            control={form.control}
+            name='description'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Description</FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder='Enter article description'
+                    className='resize-none'
+                    rows={3}
+                    {...field}
+                  />
+                </FormControl>
+                <FormDescription>
+                  Brief description of your article (max 500 characters)
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          {/* Message Display */}
+          {message && (
+            <div
+              className={`p-3 rounded-md ${
+                message.includes("✅")
+                  ? "bg-green-50 text-green-700 border border-green-200"
+                  : "bg-red-50 text-red-700 border border-red-200"
+              }`}
+            >
+              {message}
+            </div>
           )}
-        </div>
 
-        {/* Title Input */}
-        <div>
-          <label
-            htmlFor='title'
-            className='block text-sm font-medium text-gray-700 mb-2'
-          >
-            Title *
-          </label>
-          <input
-            id='title'
-            type='text'
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder='Enter article title'
-            className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-            required
-          />
-        </div>
-
-        {/* Description Input */}
-        <div>
-          <label
-            htmlFor='description'
-            className='block text-sm font-medium text-gray-700 mb-2'
-          >
-            Description
-          </label>
-          <textarea
-            id='description'
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder='Enter article description'
-            rows={3}
-            className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-          />
-        </div>
-
-        {/* Category Select */}
-        <div>
-          <label
-            htmlFor='category'
-            className='block text-sm font-medium text-gray-700 mb-2'
-          >
-            Category
-          </label>
-          <select
-            id='category'
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className='w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-          >
-            <option value='medical'>Medical</option>
-            <option value='research'>Research</option>
-            <option value='education'>Education</option>
-            <option value='technology'>Technology</option>
-            <option value='other'>Other</option>
-          </select>
-        </div>
-
-        {/* Message Display */}
-        {message && (
-          <div
-            className={`p-3 rounded-md ${
-              message.includes("✅")
-                ? "bg-green-50 text-green-700 border border-green-200"
-                : "bg-red-50 text-red-700 border border-red-200"
-            }`}
-          >
-            {message}
-          </div>
-        )}
-
-        {/* Submit Button */}
-        <Button
-          type='submit'
-          disabled={uploading || processingPayment || !file || !title.trim()}
-          className='w-full'
-        >
-          {processingPayment
-            ? "Processing Payment..."
-            : uploading
-            ? "Uploading..."
-            : "Upload Article (0.001 ETH)"}
-        </Button>
-      </form>
+          {/* Submit Button */}
+          <Button type='submit' disabled={uploading} className='w-full'>
+            {uploading ? "Uploading..." : "Upload Article ($0.01)"}
+          </Button>
+        </form>
+      </Form>
     </div>
   );
 }

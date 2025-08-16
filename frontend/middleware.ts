@@ -8,11 +8,11 @@ const network = process.env.NETWORK as Network;
 export const middleware = paymentMiddleware(
   payTo,
   {
-    "/protected": {
+    "/api/upload": {
       price: "$0.01",
       network,
       config: {
-        description: "Access to protected content",
+        description: "Upload content to Walrus",
       },
     },
   },
@@ -27,5 +27,5 @@ export const middleware = paymentMiddleware(
 
 // Configure which paths the middleware should run on
 export const config = {
-  matcher: ["/protected/:path*"],
+  matcher: ["/api/:path*"],
 };
