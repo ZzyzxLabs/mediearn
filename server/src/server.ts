@@ -20,16 +20,6 @@ import { paymentMiddleware } from "x402-express";
 // Load environment variables
 dotenv.config();
 
-// Payment middleware configuration interface
-interface PaymentMiddlewareConfig {
-  description?: string; // Description of the payment
-  mimeType?: string; // MIME type of the resource
-  maxTimeoutSeconds?: number; // Maximum time for payment (default: 60)
-  outputSchema?: Record<string, any>; // JSON schema for the response
-  customPaywallHtml?: string; // Custom HTML for the paywall
-  resource?: string; // Resource URL (defaults to request URL)
-}
-
 const blobStorage = new BlobStorage();
 
 const app = express();
@@ -133,16 +123,31 @@ app.use(express.static("public"));
 // This must be applied BEFORE the routes to intercept requests
 app.use(
   paymentMiddleware(
-    process.env.RESOURCE_WALLET_ADDRESS,
+    process.env.RESOURCE_WALLET_ADDRESS ||
+      "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da", // Your receiving wallet
     {
       "POST /api/upload": {
+        // USDC amount in dollars
         price: "$0.01",
-        network: process.env.NETWORK || "base-sepolia",
+        network: "base-sepolia", // for mainnet, see Running on Mainnet section
+        // Optional: Add metadata for better discovery in x402 Bazaar
         config: {
           description: "Upload content to Walrus decentralized storage",
-          mimeType: "application/json",
-          maxTimeoutSeconds: 120, // 2 minutes for upload processing
-          inputSchema: {},
+          inputSchema: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Article title" },
+              content: { type: "string", description: "Article content" },
+              ownerAddress: {
+                type: "string",
+                description: "Owner wallet address",
+              },
+              description: {
+                type: "string",
+                description: "Article description",
+              },
+            },
+          },
           outputSchema: {
             type: "object",
             properties: {
@@ -151,22 +156,25 @@ app.use(
               blobInfo: { type: "object" },
             },
           },
-          customPaywallHtml: `
-            <div style="text-align: center; padding: 2rem;">
-              <h2>Upload to Walrus Storage</h2>
-              <p>Pay $0.01 to upload your article to decentralized storage</p>
-              <p>Your content will be stored securely on Walrus with blockchain verification</p>
-            </div>
-          `,
-        } as PaymentMiddlewareConfig,
+        },
       },
       "GET /api/blobs/:id/content": {
+        // USDC amount in dollars
         price: "$0.01",
-        network: process.env.NETWORK || "base-sepolia",
+        network: "base-sepolia", // for mainnet, see Running on Mainnet section
+        // Optional: Add metadata for better discovery in x402 Bazaar
         config: {
           description: "Access premium article content",
-          mimeType: "application/json",
-          maxTimeoutSeconds: 60,
+          inputSchema: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Article blob ID" },
+              userAddress: {
+                type: "string",
+                description: "User wallet address",
+              },
+            },
+          },
           outputSchema: {
             type: "object",
             properties: {
@@ -176,24 +184,33 @@ app.use(
               metadata: { type: "object" },
             },
           },
-          customPaywallHtml: `
-            <div style="text-align: center; padding: 2rem;">
-              <h2>Premium Article Access</h2>
-              <p>Pay $0.01 to read this premium article</p>
-              <p>Support the author and access exclusive content</p>
-            </div>
-          `,
-        } as PaymentMiddlewareConfig,
+        },
+      },
+      "DELETE /api/blobs/:id": {
+        // USDC amount in dollars
+        price: "$0.01",
+        network: "base-sepolia", // for mainnet, see Running on Mainnet section
+        // Optional: Add metadata for better discovery in x402 Bazaar
+        config: {
+          description: "Delete article content (owner only)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Article blob ID to delete" },
+            },
+          },
+          outputSchema: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              message: { type: "string" },
+            },
+          },
+        },
       },
     },
     {
-      url:
-        process.env.NEXT_PUBLIC_FACILITATOR_URL ||
-        "https://x402.org/facilitator", // Test facilitator
-    },
-    {
-      appName: "Mediearn",
-      appLogo: "/x402-icon-blue.png",
+      url: "https://x402.org/facilitator", // for testnet
     }
   )
 );
@@ -502,36 +519,6 @@ app.get("/api/blobs/:id/content", async (req, res) => {
 
 // Remove the old manual payment endpoint since x402 middleware handles it
 // app.post('/api/blobs/:id/pay', ...) - REMOVED
-
-// Verify x402 payment using the x402 library
-async function verifyX402Payment(
-  paymentPayload: any,
-  paymentDetails: any
-): Promise<boolean> {
-  try {
-    console.log("🔍 Verifying x402 payment...", {
-      paymentPayload:
-        typeof paymentPayload === "string"
-          ? paymentPayload.substring(0, 50) + "..."
-          : "object",
-      paymentDetails: {
-        price: paymentDetails.price,
-        currency: paymentDetails.currency,
-        network: paymentDetails.network,
-      },
-    });
-
-    // TODO: Use @x402/express-middleware or @coinbase/x402 to verify payment
-    // For now, we'll simulate verification for testing
-    // In production, this would use the actual x402 verification logic
-
-    console.log("✅ x402 payment verification completed (simulated)");
-    return true;
-  } catch (error) {
-    console.error("❌ x402 payment verification failed:", error);
-    return false;
-  }
-}
 
 // Delete blob
 app.delete("/api/blobs/:id", (req, res) => {

@@ -28,13 +28,13 @@ import {
 interface ArticleCardProps {
   blobId: string;
   previewText: string;
-  onClick: (blobId: string) => void;
+  onClickAction: (blobId: string) => void;
 }
 
 export function ArticleCard({
   blobId,
   previewText,
-  onClick,
+  onClickAction,
 }: ArticleCardProps) {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -94,7 +94,7 @@ export function ArticleCard({
       className={`cursor-pointer transition-shadow hover:shadow-md`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onClick={() => onClick(blobId)}
+      onClick={() => onClickAction(blobId)}
     >
       <CardContent className='p-6'>
         <div className='flex gap-6'>

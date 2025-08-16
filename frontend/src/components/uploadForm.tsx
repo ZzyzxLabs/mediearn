@@ -80,6 +80,7 @@ export function UploadForm() {
       const hardCodedPrivateKey =
         "0x21f6ad4a9bcab0cf664e19f0cf0682aad455f43de3721710a1ea50519017b218";
       const hardCodedAccount = privateKeyToAccount(hardCodedPrivateKey);
+
       // Create fetchWithPayment wrapper with proper configuration
       const fetchWithPayment = wrapFetchWithPayment(fetch, hardCodedAccount);
 

@@ -4,9 +4,12 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, FileText } from "lucide-react";
 import Link from "next/link";
+import { apiClient, ArticlePreview, ArticleContent } from "@/lib/api";
 import { ArticleCard } from "@/components/articleCard";
 import { ArticleDetailCard } from "@/components/articleDetailCard";
-import { apiClient, ArticlePreview, ArticleContent } from "@/lib/api";
+import { wrapFetchWithPayment, decodeXPaymentResponse } from "x402-fetch";
+import { web3 } from "@/lib/coinbase";
+import { privateKeyToAccount } from "viem/accounts";
 
 export default function HomePage() {
   const [articles, setArticles] = useState<ArticlePreview[]>([]);
@@ -37,15 +40,72 @@ export default function HomePage() {
       setLoadingContent(true);
       setError(null); // Clear any previous errors
 
-      // Get user's address from web3 (you'll need to implement this)
-      const userAddress = "0x1234...5678"; // Mock address for now
-
-      const data = await apiClient.getBlobContent(blobId, userAddress);
-      if (data) {
-        setSelectedArticle(data);
-      } else {
-        throw new Error("Failed to fetch article content");
+      // Get user's address from web3
+      const accounts = await web3.eth.getAccounts();
+      if (!accounts || accounts.length === 0) {
+        throw new Error("Please connect your wallet first");
       }
+      const userAddress = accounts[0];
+
+      // Create hardcoded account for x402-fetch (same as upload form)
+      const hardCodedPrivateKey =
+        "0x21f6ad4a9bcab0cf664e19f0cf0682aad455f43de3721710a1ea50519017b218";
+      const hardCodedAccount = privateKeyToAccount(hardCodedPrivateKey);
+
+      // Create fetchWithPayment wrapper
+      const fetchWithPayment = wrapFetchWithPayment(fetch, hardCodedAccount);
+
+      console.log("Fetching article content with payment...", {
+        blobId,
+        userAddress,
+      });
+
+      // Make the request with payment handling
+      const response = await fetchWithPayment(
+        `http://localhost:8000/api/blobs/${blobId}/content?userAddress=${userAddress}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      console.log("Content response received:", {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+      });
+
+      if (!response.ok) {
+        // Handle 402 Payment Required specifically
+        if (response.status === 402) {
+          const errorData = await response.json();
+          throw new Error(
+            `Payment required: ${
+              errorData.error || "Please complete payment to access content"
+            }`
+          );
+        }
+
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to fetch article content");
+      }
+
+      const data = await response.json();
+
+      // Decode payment response if present
+      const paymentResponseHeader = response.headers.get("x-payment-response");
+      if (paymentResponseHeader) {
+        try {
+          const paymentResponse = decodeXPaymentResponse(paymentResponseHeader);
+          console.log("Payment response for content access:", paymentResponse);
+        } catch (paymentError) {
+          console.error("Error decoding payment response:", paymentError);
+        }
+      }
+
+      setSelectedArticle(data);
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -89,7 +149,7 @@ export default function HomePage() {
     return (
       <ArticleDetailCard
         article={selectedArticle}
-        onBack={() => setSelectedArticle(null)}
+        onBackAction={() => setSelectedArticle(null)}
         loading={loadingContent}
         error={error}
         onRetry={() => fetchArticleContent(selectedArticle.blobId)}
@@ -130,7 +190,7 @@ export default function HomePage() {
                     key={article.blobId}
                     blobId={article.blobId}
                     previewText={`${article.title}\n\n${article.description}`}
-                    onClick={fetchArticleContent}
+                    onClickAction={fetchArticleContent}
                   />
                 ))}
               </div>

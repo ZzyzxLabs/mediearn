@@ -17,7 +17,7 @@ interface ArticleDetailCardProps {
       isPublic: boolean;
     };
   };
-  onBack: () => void;
+  onBackAction: () => void;
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -25,7 +25,7 @@ interface ArticleDetailCardProps {
 
 export function ArticleDetailCard({
   article,
-  onBack,
+  onBackAction,
   loading = false,
   error = null,
   onRetry,
@@ -48,7 +48,7 @@ export function ArticleDetailCard({
     <div className='min-h-screen'>
       <div className='container mx-auto px-4 py-8 max-w-4xl'>
         {/* Back button */}
-        <Button variant='ghost' onClick={onBack} className='mb-6'>
+        <Button variant='ghost' onClick={onBackAction} className='mb-6'>
           ← Back to Articles
         </Button>
 
