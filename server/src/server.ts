@@ -1,43 +1,127 @@
 import express from 'express';
 import cors from 'cors';
-import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { WalrusClient, TESTNET_WALRUS_PACKAGE_CONFIG } from '@mysten/walrus';
+import { WalrusClient, TESTNET_WALRUS_PACKAGE_CONFIG, WalrusFile } from '@mysten/walrus';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import { Secp256k1Keypair } from '@mysten/sui/keypairs/secp256k1';
+import { Secp256r1Keypair } from '@mysten/sui/keypairs/secp256r1';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { fromB64 } from '@mysten/sui/utils';
-import { articleDB, Article } from './database';
 import dotenv from 'dotenv';
+import { BlobInfo, BlobStorage } from './blobStorage';
 
 // Load environment variables
 dotenv.config();
 
+// Helper function to process blob content and extract actual data
+function processBlobContent(rawBlob: Uint8Array, expectedSize?: number): string {
+    console.log('🔍 Processing blob of length:', rawBlob.length);
+    
+    if (expectedSize && expectedSize > 0) {
+        console.log('🔍 Expected content size:', expectedSize);
+        
+        // Simply extract the first N bytes where N is the expected content size
+        // The actual content should be at the beginning of the blob
+        const actualContent = rawBlob.slice(0, expectedSize);
+        
+        console.log(`🔍 Extracting first ${expectedSize} bytes from blob`);
+        
+        // Decode as UTF-8
+        try {
+            const decoder = new TextDecoder('utf-8', { fatal: false });
+            const decodedString = decoder.decode(actualContent);
+            
+            // Clean up any remaining artifacts
+            const cleanedString = decodedString
+                .replace(/\0/g, '') // Remove null characters
+                .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
+                .trim();
+            
+            console.log('🔍 Extracted content:', cleanedString.substring(0, 100) + '...');
+            return cleanedString;
+            
+        } catch (error) {
+            console.warn('UTF-8 decode failed for extracted content');
+        }
+    }
+    
+    // Fallback: try to decode the entire blob as UTF-8
+    try {
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        const decodedString = decoder.decode(rawBlob);
+        
+        // Clean up the decoded string
+        const cleanedString = decodedString
+            .replace(/\0/g, '') // Remove null characters
+            .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remove control characters
+            .replace(/\s+/g, ' ') // Normalize whitespace
+            .trim();
+        
+        if (cleanedString.length > 50) {
+            console.log('🔍 Using fallback decoded string:', cleanedString.substring(0, 100) + '...');
+            return cleanedString;
+        }
+        
+    } catch (error) {
+        console.warn('UTF-8 decode failed');
+    }
+
+    // If all else fails, return the first 100 bytes as hex for debugging
+    console.warn('Could not extract readable content, returning hex');
+    return Array.from(rawBlob.slice(0, Math.min(100, rawBlob.length))).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+
+
+
+
+const blobStorage = new BlobStorage();
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Get Sui Private Key from environment variable
+// Get Sui Private Key and Public Key from environment variables
 const SUI_PRIVATE_KEY = process.env.SUI_PRIVATE_KEY;
+const SUI_PUBLIC_KEY = process.env.SUI_PUBLIC_KEY;
 
-// Parse Sui private key function
-function parseSuiPrivateKey(privateKeyString: string): Ed25519Keypair | null {
+// Create keypair from private key (trying different keypair types)
+function createSuiKeypair(privateKeyString: string): Ed25519Keypair | Secp256k1Keypair | Secp256r1Keypair | null {
     try {
-        // Remove the 'suiprivkey' prefix
-        const cleanKey = privateKeyString.replace(/^suiprivkey/, '');
+        console.log('🔍 Creating keypair from private key...');
+        console.log(`📝 Private key format: ${privateKeyString.substring(0, 10)}...${privateKeyString.substring(privateKeyString.length - 10)}`);
+        console.log(`📏 Private key length: ${privateKeyString.length}`);
 
-        // Decode from base64
-        const decoded = fromB64(cleanKey);
+        let keypair: Ed25519Keypair | Secp256k1Keypair | Secp256r1Keypair;
 
-        // Extract the first 32 bytes as the private key
-        if (decoded.length >= 32) {
-            const privateKeyBytes = decoded.slice(0, 32);
-            return Ed25519Keypair.fromSecretKey(privateKeyBytes);
-        } else {
-            console.error('Invalid private key length:', decoded.length);
-            return null;
+        // Try different keypair types
+        try {
+            console.log('🔧 Trying Ed25519...');
+            keypair = Ed25519Keypair.fromSecretKey(privateKeyString);
+            console.log('✅ Ed25519 keypair created');
+        } catch (ed25519Error) {
+            try {
+                console.log('🔧 Trying Secp256k1...');
+                keypair = Secp256k1Keypair.fromSecretKey(privateKeyString);
+                console.log('✅ Secp256k1 keypair created');
+            } catch (secp256k1Error) {
+                try {
+                    console.log('🔧 Trying Secp256r1...');
+                    keypair = Secp256r1Keypair.fromSecretKey(privateKeyString);
+                    console.log('✅ Secp256r1 keypair created');
+                } catch (secp256r1Error) {
+                    throw new Error('Failed to create keypair with any type');
+                }
+            }
         }
+
+        // console log the public key
+        console.log(`📝 Public key: ${keypair.toSuiAddress()}`);
+
+        console.log(`✅ Keypair created successfully, derived address: ${keypair.toSuiAddress()}`);
+        return keypair;
     } catch (error) {
-        console.error('Error parsing Sui private key:', error);
+        console.error('❌ Error creating Sui keypair:', error);
         return null;
     }
 }
@@ -45,26 +129,32 @@ function parseSuiPrivateKey(privateKeyString: string): Ed25519Keypair | null {
 // Initialize Sui client for testnet
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 
-// Initialize Walrus client with testnet configuration
-const walrusClient = new WalrusClient(TESTNET_WALRUS_PACKAGE_CONFIG as any);
+// Initialize Walrus client with testnet configuration and Sui client
+const walrusClient = new WalrusClient({
+    suiClient,
+    network: 'testnet',
+});
 
-// Try to set Sui client if the property exists
-if ('suiClient' in walrusClient) {
-    (walrusClient as any).suiClient = suiClient;
+// Create Sui keypair
+if (!SUI_PRIVATE_KEY || !SUI_PUBLIC_KEY) {
+    console.log('❌ Both SUI_PRIVATE_KEY and SUI_PUBLIC_KEY environment variables must be set - Walrus uploads will fail');
+    console.log('📝 Please add both to your .env file');
 }
 
-// Parse Sui private key
-if (!SUI_PRIVATE_KEY) {
-    console.log('❌ SUI_PRIVATE_KEY environment variable not set - Walrus uploads will fail');
-    console.log('📝 Please add SUI_PRIVATE_KEY to your .env file');
-}
-
-const keypair = SUI_PRIVATE_KEY ? parseSuiPrivateKey(SUI_PRIVATE_KEY) : null;
+const keypair = SUI_PRIVATE_KEY ? createSuiKeypair(SUI_PRIVATE_KEY) : null;
 
 if (keypair) {
-    console.log('✅ Sui private key parsed successfully');
+    console.log('✅ Sui keypair created successfully');
+    console.log(`📍 Public Key: ${SUI_PUBLIC_KEY}`);
+
+    // Verify the public key matches
+    const derivedPublicKey = keypair.toSuiAddress();
+    if (derivedPublicKey !== SUI_PUBLIC_KEY) {
+        console.log(`⚠️ Warning: Derived public key (${derivedPublicKey}) doesn't match provided public key (${SUI_PUBLIC_KEY})`);
+        console.log('This might cause issues with Walrus operations');
+    }
 } else {
-    console.log('❌ Failed to parse Sui private key - Walrus uploads will fail');
+    console.log('❌ Failed to create Sui keypair - Walrus uploads will fail');
 }
 
 // Middleware
@@ -72,40 +162,20 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const uploadDir = 'uploads/';
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-    }
-});
-
-const upload = multer({
-    storage: storage,
-    limits: {
-        fileSize: 10 * 1024 * 1024 // 10MB limit
-    }
-});
-
 // Routes
 
-// Upload content (placeholder for Walrus integration)
-app.post('/api/upload', upload.single('content'), async (req, res) => {
+// Upload content to Walrus and store blob info
+app.post('/api/upload', async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No file uploaded' });
+        const { title, content, isPublic = true, ownerAddress } = req.body;
+
+        if (!title || !content) {
+            return res.status(400).json({ error: 'Both title and content are required' });
         }
 
-        const { title, description, category } = req.body;
-        const filePath = req.file.path;
-        const fileName = req.file.originalname;
+        if (!ownerAddress) {
+            return res.status(400).json({ error: 'ownerAddress is required' });
+        }
 
         // Upload to Walrus
         if (!keypair) {
@@ -113,162 +183,129 @@ app.post('/api/upload', upload.single('content'), async (req, res) => {
         }
 
         console.log('Uploading to Walrus...');
-        const fileBuffer = fs.readFileSync(filePath);
+        const fileBuffer = new Uint8Array(Buffer.from(content, 'utf8'));
+        const fileSize = fileBuffer.byteLength;
 
-        let article: Article;
+        // Check WAL balance first
+        try {
+            const walletAddress = ownerAddress;
+            console.log('🔍 Checking WAL token balance...');
+            console.log(`📍 Wallet Address: ${walletAddress}`);
+            console.log(`🌐 Network: testnet`);
+            console.log(`🪙 WAL Token Contract: 0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL`);
 
+            const coins = await suiClient.getCoins({
+                owner: walletAddress,
+                coinType: '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL'
+            });
 
+            console.log(`📊 Raw coins response:`, JSON.stringify(coins, null, 2));
 
-        // Get the Sui address from the keypair for ownership
-        const ownerAddress = keypair ? keypair.toSuiAddress() : 'unknown';
-        const isPublic = req.body.isPublic !== 'false'; // Default to public unless explicitly set to false
+            const totalBalance = coins.data.reduce((sum, coin) => sum + BigInt(coin.balance), BigInt(0));
+            console.log(`💰 Current WAL Balance: ${totalBalance} WAL`);
+
+            if (totalBalance === BigInt(0)) {
+                console.log('❌ No WAL tokens found. You need to get WAL tokens first.');
+                console.log('💡 Try: https://suiexplorer.com/faucet or swap SUI for WAL on testnet');
+            }
+        } catch (balanceError) {
+            console.log('⚠️ Could not check WAL balance:', balanceError);
+        }
+
+        let blobInfo: BlobInfo;
 
         try {
-            // Upload files using writeFiles method
-            console.log('🔄 Uploading files to Walrus using writeFiles...');
+            // Create preview text for local storage
+            const firstParagraph = content.split('\n\n')[0] || content.substring(0, 200);
+            const previewText = `${title}\n\n${firstParagraph}`;
 
-            // Create preview blob from file content
-            const fileContent = fileBuffer.toString('utf8');
-            const firstParagraph = fileContent.split('\n\n')[0] || fileContent.substring(0, 200);
-            const previewBlob = Buffer.from(`${fileName}\n\n${firstParagraph}`, 'utf8');
+            let contentBlobId: string;
 
-            // Declare variables at function level
-            let previewObjectId: string;
-            let contentObjectId: string;
-
-            // For now, let's try a simpler approach with writeBlob but handle the error differently
-            console.log('🔄 Trying writeBlob with error handling...');
+            console.log('🔄 Uploading content to Walrus...');
 
             try {
-                const previewResult = await walrusClient.writeBlob({
-                    blob: previewBlob,
-                    deletable: true,
-                    epochs: 1000,
-                    signer: keypair as any,
-                    attributes: {
-                        type: 'preview',
-                        originalName: fileName,
-                        uploadDate: new Date().toISOString()
+                console.log('🔄 Uploading article content to Walrus using writeFiles...');
+
+                // Log storage requirements
+                const totalBytes = fileBuffer.byteLength;
+                const epochs = 1; // Set to 1 to make storage as cheap as possible
+                console.log(`📊 Storage Requirements:`);
+                console.log(`   - Article content: ${totalBytes} bytes`);
+                console.log(`   - Storage duration: ${epochs} epochs`);
+                console.log(`   - Estimated WAL cost: ${totalBytes * epochs / 1000000} WAL (rough estimate)`);
+
+                // Create WalrusFile object for the entire article content
+                const contentFile = WalrusFile.from({
+                    contents: fileBuffer,
+                    identifier: `article-${title}-${Date.now()}`,
+                    tags: {
+                        'type': 'article',
+                        'title': title
                     }
                 });
 
-                console.log('✅ Preview blob uploaded successfully:', previewResult);
-
-                // Try content blob
-                const contentResult = await walrusClient.writeBlob({
-                    blob: fileBuffer,
+                const results = await walrusClient.writeFiles({
+                    files: [contentFile],
                     deletable: true,
-                    epochs: 1000,
-                    signer: keypair as any,
-                    attributes: {
-                        type: 'content',
-                        originalName: fileName,
-                        uploadDate: new Date().toISOString()
-                    }
+                    epochs: 1, // Set to 1 to make storage as cheap as possible
+                    signer: keypair as any
                 });
 
-                console.log('✅ Content blob uploaded successfully:', contentResult);
+                // Handle the results array properly
+                const contentResult = Array.isArray(results) ? results[0] : results;
 
-                // Extract information from the results
-                previewObjectId = contentResult.blobObject?.id?.id || 'success-preview-' + Date.now();
-                contentObjectId = contentResult.blobObject?.id?.id || 'success-content-' + Date.now();
+                console.log('✅ Article content uploaded successfully to Walrus:', contentResult);
 
-                console.log('🔍 Extracted object IDs - Preview:', previewObjectId, 'Content:', contentObjectId);
+                // Extract blob ID from the result
+                if (!contentResult?.blobId) {
+                    throw new Error('Walrus upload failed: Missing blob ID from response');
+                }
+
+                contentBlobId = contentResult.blobId;
+
+                console.log('🔍 Extracted blob ID:', contentBlobId);
 
             } catch (writeError) {
-                console.log('⚠️ writeBlob failed, trying alternative approach...');
-                // Set fallback IDs if writeBlob fails
-                previewObjectId = 'fallback-preview-' + Date.now();
-                contentObjectId = 'fallback-content-' + Date.now();
-                console.log('🔍 Using fallback IDs - Preview:', previewObjectId, 'Content:', contentObjectId);
+                console.error('⚠️ writeFiles failed with error:', writeError);
+                throw new Error(`Walrus upload failed: ${writeError instanceof Error ? writeError.message : 'Unknown error'}`);
             }
 
-            // Create article with both blobs
-            article = articleDB.createArticle({
-                fileName: fileName,
-                originalFileSize: req.file.size,
-                tags: [],
-                owner: {
-                    suiAddress: ownerAddress,
-                    isPublic: isPublic,
-                    transferable: true
-                },
+            // Create blob info with preview text stored locally and content blob ID from Walrus
+            blobInfo = blobStorage.createBlob({
+                title: title,
+                originalFileSize: content.length, // Store the actual content size, not file size
+                ownerAddress: ownerAddress,
+                isPublic: req.body.isPublic !== 'false', // Default to public unless explicitly set to false
+                previewText: previewText, // Store preview text locally
                 walrus: {
-                    previewBlob: {
-                        blobId: 'flow-preview-' + Date.now(),
-                        objectId: previewObjectId,
-                        storageEpochs: 1000,
-                        isCertified: true,
-                        uploadStatus: 'success',
-                        uploadDate: new Date().toISOString()
-                    },
                     contentBlob: {
-                        blobId: 'flow-content-' + Date.now(),
-                        objectId: contentObjectId,
-                        storageEpochs: 1000,
+                        blobId: contentBlobId,
+                        storageEpochs: 1,
                         isCertified: true,
                         uploadStatus: 'success',
                         uploadDate: new Date().toISOString()
                     },
                     overallStatus: 'success'
-                },
-                local: {
-                    filePath: filePath,
-                    fileSize: req.file.size,
-                    isCompressed: false
                 }
             });
+
         } catch (walrusError) {
             console.error('❌ Walrus upload failed:', walrusError);
 
-            // Create article with local storage only
-            article = articleDB.createArticle({
-
-                fileName: fileName,
-                originalFileSize: req.file.size,
-                tags: [],
-                owner: {
-                    suiAddress: ownerAddress,
-                    isPublic: isPublic,
-                    transferable: true
-                },
-                walrus: {
-                    previewBlob: {
-                        blobId: null,
-                        objectId: null,
-                        storageEpochs: null,
-                        isCertified: false,
-                        uploadStatus: 'failed',
-                        uploadDate: null,
-                        errorMessage: walrusError instanceof Error ? walrusError.message : 'Unknown error'
-                    },
-                    contentBlob: {
-                        blobId: null,
-                        objectId: null,
-                        storageEpochs: null,
-                        isCertified: false,
-                        uploadStatus: 'failed',
-                        uploadDate: null,
-                        errorMessage: walrusError instanceof Error ? walrusError.message : 'Unknown error'
-                    },
-                    overallStatus: 'failed'
-                },
-                local: {
-                    filePath: filePath,
-                    fileSize: req.file.size,
-                    isCompressed: false
-                }
+            // Return error response instead of creating local blob
+            return res.status(500).json({
+                success: false,
+                error: 'Walrus upload failed',
+                message: 'Failed to upload content to decentralized storage',
+                details: walrusError instanceof Error ? walrusError.message : 'Unknown error'
             });
         }
 
+        // Only reach here if Walrus upload was successful
         res.json({
             success: true,
-            message: article.walrus?.overallStatus === 'success'
-                ? 'Content uploaded successfully to Walrus (preview + content blobs)'
-                : article.walrus?.overallStatus === 'failed'
-                    ? 'Content uploaded locally (Walrus upload failed)'
-                    : 'Content uploaded with unknown status',
-            article: article
+            message: 'Article uploaded successfully to Walrus with local preview storage',
+            blobInfo: blobInfo
         });
 
     } catch (error) {
@@ -277,299 +314,196 @@ app.post('/api/upload', upload.single('content'), async (req, res) => {
     }
 });
 
-// Upload content as string (easier for remote clients)
-app.post('/api/upload/string', async (req, res) => {
+
+
+// Get all blobs (with full information)
+app.get('/api/blobs', (req, res) => {
     try {
-        const { content, fileName, isPublic = true } = req.body;
+        const blobs = blobStorage.getAllBlobs();
+        res.json(blobs);
+    } catch (error) {
+        console.error('Error reading blobs:', error);
+        res.status(500).json({ error: 'Failed to fetch blobs' });
+    }
+});
 
-        if (!content || !fileName) {
-            return res.status(400).json({
-                error: 'Both content and fileName are required'
-            });
+// Get all blob previews from local storage
+app.get('/api/blobs/preview', (req, res) => {
+    try {
+        const blobs = blobStorage.getAllBlobs().filter(blob => blob.previewText);
+
+        if (blobs.length === 0) {
+            return res.json([]);
         }
 
-        // Upload to Walrus
-        if (!keypair) {
-            throw new Error('Private key not properly configured - cannot upload to Walrus');
-        }
-
-        console.log('Uploading string content to Walrus...');
-
-        // Convert string to buffer
-        const contentBuffer = Buffer.from(content, 'utf8');
-        const contentSize = contentBuffer.byteLength;
-
-        // Create a temporary file path for local storage
-        const tempFileName = `string-upload-${Date.now()}.txt`;
-        const tempFilePath = path.join('uploads', tempFileName);
-
-        // Ensure uploads directory exists
-        if (!fs.existsSync('uploads')) {
-            fs.mkdirSync('uploads', { recursive: true });
-        }
-
-        // Save content to temporary file for local storage
-        fs.writeFileSync(tempFilePath, content);
-
-        let article: Article;
-
-        try {
-            // Create preview blob from content
-            const firstParagraph = content.split('\n\n')[0] || content.substring(0, 200);
-            const previewBlob = Buffer.from(`${fileName}\n\n${firstParagraph}`, 'utf8');
-
-            let previewObjectId: string;
-            let contentObjectId: string;
-
-            console.log('🔄 Uploading string content to Walrus...');
-
-            try {
-                const previewResult = await walrusClient.writeBlob({
-                    blob: previewBlob,
-                    deletable: true,
-                    epochs: 1000,
-                    signer: keypair as any,
-                    attributes: {
-                        type: 'preview',
-                        originalName: fileName,
-                        uploadDate: new Date().toISOString()
-                    }
-                });
-
-                console.log('✅ Preview blob uploaded successfully:', previewResult);
-
-                const contentResult = await walrusClient.writeBlob({
-                    blob: contentBuffer,
-                    deletable: true,
-                    epochs: 1000,
-                    signer: keypair as any,
-                    attributes: {
-                        type: 'content',
-                        originalName: fileName,
-                        uploadDate: new Date().toISOString()
-                    }
-                });
-
-                console.log('✅ Content blob uploaded successfully:', contentResult);
-
-                previewObjectId = contentResult.blobObject?.id?.id || 'success-preview-' + Date.now();
-                contentObjectId = contentResult.blobObject?.id?.id || 'success-content-' + Date.now();
-
-                console.log('🔍 Extracted object IDs - Preview:', previewObjectId, 'Content:', contentObjectId);
-
-            } catch (writeError) {
-                console.log('⚠️ writeBlob failed, using fallback IDs...');
-                previewObjectId = 'fallback-preview-' + Date.now();
-                contentObjectId = 'fallback-content-' + Date.now();
-            }
-
-            // Create article with both blobs
-            article = articleDB.createArticle({
-                fileName: fileName,
-                originalFileSize: contentSize,
-                tags: [],
-                owner: {
-                    suiAddress: keypair.toSuiAddress(),
-                    isPublic: isPublic,
-                    transferable: true
-                },
-                walrus: {
-                    previewBlob: {
-                        blobId: 'string-preview-' + Date.now(),
-                        objectId: previewObjectId,
-                        storageEpochs: 1000,
-                        isCertified: true,
-                        uploadStatus: 'success',
-                        uploadDate: new Date().toISOString()
-                    },
-                    contentBlob: {
-                        blobId: 'string-content-' + Date.now(),
-                        objectId: contentObjectId,
-                        storageEpochs: 1000,
-                        isCertified: true,
-                        uploadStatus: 'success',
-                        uploadDate: new Date().toISOString()
-                    },
-                    overallStatus: 'success'
-                },
-                local: {
-                    filePath: tempFilePath,
-                    fileSize: contentSize,
-                    isCompressed: false
-                }
-            });
-
-        } catch (walrusError) {
-            console.error('❌ Walrus upload failed:', walrusError);
-
-            // Create article with local storage only
-            article = articleDB.createArticle({
-                fileName: fileName,
-                originalFileSize: contentSize,
-                tags: [],
-                owner: {
-                    suiAddress: keypair.toSuiAddress(),
-                    isPublic: isPublic,
-                    transferable: true
-                },
-                walrus: {
-                    previewBlob: {
-                        blobId: null,
-                        objectId: null,
-                        storageEpochs: null,
-                        isCertified: false,
-                        uploadStatus: 'failed',
-                        uploadDate: null,
-                        errorMessage: walrusError instanceof Error ? walrusError.message : 'Unknown error'
-                    },
-                    contentBlob: {
-                        blobId: null,
-                        objectId: null,
-                        storageEpochs: null,
-                        isCertified: false,
-                        uploadStatus: 'failed',
-                        uploadDate: null,
-                        errorMessage: walrusError instanceof Error ? walrusError.message : 'Unknown error'
-                    },
-                    overallStatus: 'failed'
-                },
-                local: {
-                    filePath: tempFilePath,
-                    fileSize: contentSize,
-                    isCompressed: false
-                }
-            });
-        }
-
-        res.json({
-            success: true,
-            message: article.walrus?.overallStatus === 'success'
-                ? 'String content uploaded successfully to Walrus'
-                : 'String content uploaded locally (Walrus upload failed)',
-            article: article
+        // Return only preview text and blob ID for each blob
+        const previewsWithContent = blobs.map((blob) => {
+            return {
+                blobId: blob.id,
+                previewText: blob.previewText
+            };
         });
 
+        res.json(previewsWithContent);
     } catch (error) {
-        console.error('String upload error:', error);
-        res.status(500).json({ error: 'Failed to upload string content' });
+        console.error('Error reading blob previews:', error);
+        res.status(500).json({ error: 'Failed to fetch blob previews' });
     }
 });
 
-// Get all articles (with full information)
-app.get('/api/articles', (req, res) => {
+// Get full content from Walrus by blob ID
+app.get('/api/blobs/:id/content', async (req, res) => {
     try {
-        const articles = articleDB.getAllArticles();
-        res.json(articles);
+        const { id } = req.params;
+
+        // Get blob info from local storage
+        const blob = blobStorage.getBlob(id);
+
+        if (!blob) {
+            return res.status(404).json({ error: 'Blob not found' });
+        }
+
+        // Check if blob has content information
+        if (!blob.walrus?.contentBlob?.blobId) {
+            return res.status(404).json({ error: 'Content not available for this blob' });
+        }
+
+        try {
+            // Fetch content from Walrus using readBlob
+            if (!blob.walrus.contentBlob.blobId) {
+                return res.status(404).json({ error: 'Content blob ID not available' });
+            }
+
+            const rawContent = await walrusClient.readBlob({ blobId: blob.walrus.contentBlob.blobId });
+            console.log(`🔍 Raw content for blob ${id}:`, rawContent);
+
+            // Process the blob to extract actual content using the stored content size
+            const processedContent = processBlobContent(rawContent, blob.originalFileSize);
+            console.log(`🔍 Processed content for blob ${id}:`, processedContent);
+
+            res.json({
+                blobId: id,
+                title: blob.title,
+                content: processedContent,
+                metadata: {
+                    uploadDate: blob.uploadDate,
+                    ownerAddress: blob.ownerAddress,
+                    isPublic: blob.isPublic,
+                    originalFileSize: blob.originalFileSize
+                }
+            });
+        } catch (walrusError) {
+            console.error('Error fetching content from Walrus:', walrusError);
+            res.status(500).json({
+                error: 'Failed to fetch content from Walrus',
+                details: walrusError instanceof Error ? walrusError.message : 'Unknown error'
+            });
+        }
     } catch (error) {
-        console.error('Error reading articles:', error);
-        res.status(500).json({ error: 'Failed to fetch articles' });
+        console.error('Error reading blob content:', error);
+        res.status(500).json({ error: 'Failed to fetch blob content' });
     }
 });
 
-// Get articles with only preview information (for browsing)
-app.get('/api/articles/preview', (req, res) => {
-    try {
-        const articles = articleDB.getArticlesPreview();
-        res.json(articles);
-    } catch (error) {
-        console.error('Error reading article previews:', error);
-        res.status(500).json({ error: 'Failed to fetch article previews' });
-    }
-});
-
-// Search articles (must come before :id route)
-app.get('/api/articles/search', (req, res) => {
+// Search blobs (must come before :id route)
+app.get('/api/blobs/search', (req, res) => {
     try {
         const { q } = req.query;
         if (!q || typeof q !== 'string') {
             return res.status(400).json({ error: 'Query parameter "q" is required' });
         }
 
-        const articles = articleDB.searchArticles(q);
-        res.json(articles);
+        const blobs = blobStorage.getAllBlobs().filter(blob =>
+            blob.title.includes(q) || blob.ownerAddress.includes(q)
+        );
+        res.json(blobs);
     } catch (error) {
-        console.error('Error searching articles:', error);
-        res.status(500).json({ error: 'Failed to search articles' });
+        console.error('Error searching blobs:', error);
+        res.status(500).json({ error: 'Failed to search blobs' });
     }
 });
 
-// Get articles by upload status
-app.get('/api/articles/status/:status', (req, res) => {
+// Get blobs by upload status
+app.get('/api/blobs/status/:status', (req, res) => {
     try {
         const { status } = req.params;
-        const articles = articleDB.getArticlesByStatus(status as Article['walrus']['overallStatus']);
-        res.json(articles);
+        const blobs = blobStorage.getAllBlobs().filter(blob => blob.walrus?.overallStatus === status);
+        res.json(blobs);
     } catch (error) {
-        console.error('Error reading articles by status:', error);
-        res.status(500).json({ error: 'Failed to fetch articles' });
+        console.error('Error reading blobs by status:', error);
+        res.status(500).json({ error: 'Failed to fetch blobs' });
     }
 });
 
-// Get article by ID (must come after specific routes)
-app.get('/api/articles/:id', (req, res) => {
+// Get blob by ID (must come after specific routes)
+app.get('/api/blobs/:id', (req, res) => {
     try {
         const { id } = req.params;
-        const article = articleDB.getArticle(id);
+        const blob = blobStorage.getBlob(id);
 
-        if (!article) {
-            return res.status(404).json({ error: 'Article not found' });
+        if (!blob) {
+            return res.status(404).json({ error: 'Blob not found' });
         }
 
-        res.json(article);
+        res.json(blob);
     } catch (error) {
-        console.error('Error reading article:', error);
-        res.status(500).json({ error: 'Failed to fetch article' });
+        console.error('Error reading blob:', error);
+        res.status(500).json({ error: 'Failed to fetch blob' });
     }
 });
 
-// Get articles owned by a specific Sui address
-app.get('/api/articles/owner/:address', (req, res) => {
+// Get blobs owned by a specific Sui address
+app.get('/api/blobs/owner/:address', (req, res) => {
     try {
         const { address } = req.params;
-        const articles = articleDB.getArticlesByOwner(address);
-        res.json(articles);
+        const blobs = blobStorage.getAllBlobs().filter(blob => blob.ownerAddress === address);
+        res.json(blobs);
     } catch (error) {
-        console.error('Error reading articles by owner:', error);
-        res.status(500).json({ error: 'Failed to fetch articles by owner' });
+        console.error('Error reading blobs by owner:', error);
+        res.status(500).json({ error: 'Failed to fetch blobs by owner' });
     }
 });
 
-// Get public articles (accessible to everyone)
-app.get('/api/articles/public', (req, res) => {
+// Get public blobs (accessible to everyone)
+app.get('/api/blobs/public', (req, res) => {
     try {
-        const articles = articleDB.getPublicArticles();
-        res.json(articles);
+        const blobs = blobStorage.getAllBlobs().filter(blob => blob.isPublic);
+        res.json(blobs);
     } catch (error) {
-        console.error('Error reading public articles:', error);
-        res.status(500).json({ error: 'Failed to fetch public articles' });
+        console.error('Error reading public blobs:', error);
+        res.status(500).json({ error: 'Failed to fetch public blobs' });
     }
 });
 
-// Get articles by ownership type with optional address
-app.get('/api/articles/ownership/:type', (req, res) => {
+// Get blobs by ownership type with optional address
+app.get('/api/blobs/ownership/:type', (req, res) => {
     try {
         const { type } = req.params;
         const { address } = req.query;
 
         if (type === 'owned' && !address) {
-            return res.status(400).json({ error: 'Address parameter required for owned articles' });
+            return res.status(400).json({ error: 'Address parameter required for owned blobs' });
         }
 
-        const articles = articleDB.getArticlesByOwnershipType(
-            type as 'owned' | 'public' | 'all',
-            address as string
-        );
-        res.json(articles);
+        const blobs = blobStorage.getAllBlobs().filter(blob => {
+            const matchesType = (() => {
+                if (type === 'owned') return blob.ownerAddress === address;
+                if (type === 'public') return blob.isPublic;
+                return true; // 'all'
+            })();
+            return matchesType;
+        });
+        res.json(blobs);
     } catch (error) {
-        console.error('Error reading articles by ownership:', error);
-        res.status(500).json({ error: 'Failed to fetch articles by ownership' });
+        console.error('Error reading blobs by ownership:', error);
+        res.status(500).json({ error: 'Failed to fetch blobs by ownership' });
     }
 });
 
 // Get database statistics
 app.get('/api/stats', (req, res) => {
     try {
-        const stats = articleDB.getStats();
+        const stats = blobStorage.getStats();
         res.json(stats);
     } catch (error) {
         console.error('Error getting stats:', error);
@@ -577,26 +511,26 @@ app.get('/api/stats', (req, res) => {
     }
 });
 
-// Delete article
-app.delete('/api/articles/:id', (req, res) => {
+// Delete blob
+app.delete('/api/blobs/:id', (req, res) => {
     try {
         const { id } = req.params;
-        const success = articleDB.deleteArticle(id);
+        const success = blobStorage.deleteBlob(id);
 
         if (success) {
-            res.json({ success: true, message: 'Article deleted successfully' });
+            res.json({ success: true, message: 'Blob deleted successfully' });
         } else {
-            res.status(404).json({ error: 'Article not found' });
+            res.status(404).json({ error: 'Blob not found' });
         }
     } catch (error) {
-        console.error('Error deleting article:', error);
-        res.status(500).json({ error: 'Failed to delete article' });
+        console.error('Error deleting blob:', error);
+        res.status(500).json({ error: 'Failed to delete blob' });
     }
 });
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-    const stats = articleDB.getStats();
+    const stats = blobStorage.getStats();
     res.json({
         status: 'OK',
         timestamp: new Date().toISOString(),
@@ -604,10 +538,8 @@ app.get('/api/health', (req, res) => {
         walrusStatus: keypair ? 'Private key configured' : 'Private key parsing needed',
         suiNetwork: 'testnet',
         database: {
-            totalArticles: stats.totalArticles,
-            totalSize: stats.totalSize,
-
-            lastBackup: stats.lastBackup
+            totalBlobs: stats.totalBlobs,
+            lastUpdated: stats.lastUpdated
         }
     });
 });
@@ -617,14 +549,14 @@ app.listen(PORT, () => {
     console.log(`🚀 MedEarn server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
     console.log(`📤 Upload endpoint: http://localhost:${PORT}/api/upload`);
-    console.log(`📚 Articles endpoint: http://localhost:${PORT}/api/articles`);
-    console.log(`👀 Articles preview: http://localhost:${PORT}/api/articles/preview`);
-    console.log(`🔍 Search endpoint: http://localhost:${PORT}/api/articles/search?q=query`);
-    console.log(`👤 Ownership endpoints: http://localhost:${PORT}/api/articles/owner/:address`);
-    console.log(`🌍 Public articles: http://localhost:${PORT}/api/articles/public`);
+    console.log(`📚 Blobs endpoint: http://localhost:${PORT}/api/blobs`);
+    console.log(`👀 Blobs preview: http://localhost:${PORT}/api/blobs/preview`);
+    console.log(`🔍 Search endpoint: http://localhost:${PORT}/api/blobs/search?q=query`);
+    console.log(`👤 Ownership endpoints: http://localhost:${PORT}/api/blobs/owner/:address`);
+    console.log(`🌍 Public blobs: http://localhost:${PORT}/api/blobs/public`);
     console.log(`📈 Stats endpoint: http://localhost:${PORT}/api/stats`);
     console.log(`🌐 Web interface: http://localhost:${PORT}`);
     console.log(`🔑 Walrus Status: ${keypair ? 'Private key configured' : 'Private key parsing needed'}`);
-    console.log(`💾 Database: ${articleDB.getStats().totalArticles} articles loaded`);
+    console.log(`💾 Database: ${blobStorage.getStats().totalBlobs} blobs loaded`);
     console.log(`📝 Note: Add proper Sui private key parsing to enable full Walrus functionality`);
 }); 
