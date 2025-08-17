@@ -171,9 +171,9 @@ export default function HomePage() {
     <div className='min-h-screen'>
       <div className='container mx-auto px-4 py-8'>
         {/* Header */}
-        <div className='mb-8'>
+        <div className='mb-8 flex flex-col items-center'>
           <h1 className='text-4xl font-bold mb-2'>Articles</h1>
-          <p className='text-muted-foreground mt-3'>
+          <p className='text-muted-foreground mt-3 text-center'>
             Discover articles stored on decentralized Walrus storage
           </p>
         </div>
@@ -198,7 +198,10 @@ export default function HomePage() {
                   <ArticleCard
                     key={article.blobId}
                     blobId={article.blobId}
-                    previewText={`${article.title}\n\n${article.description}`}
+                    title={article.title}
+                    description={article.description}
+                    ownerAddress={article.ownerAddress}
+                    uploadDate={article.uploadDate}
                     onClickAction={fetchArticleContent}
                   />
                 ))}

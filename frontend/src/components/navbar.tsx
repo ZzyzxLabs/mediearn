@@ -32,9 +32,15 @@ export function Navbar() {
       <div className='w-full flex h-16 items-center justify-between px-6'>
         {/* Left side - Brand */}
         <div className='flex items-center'>
-          <Link href='/' className='flex items-center'>
+          <Button
+            variant='ghost'
+            className='flex items-center p-0 h-auto hover:bg-transparent hover:text-foreground'
+            onClick={() => {
+              window.location.href = "/";
+            }}
+          >
             <span className='font-bold text-xl'>Mediearn</span>
-          </Link>
+          </Button>
           {serverStatus && (
             <span className='ml-4 text-sm text-muted-foreground'>
               {serverStatus}

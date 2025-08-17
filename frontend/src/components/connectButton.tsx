@@ -79,11 +79,6 @@ export default function ConnectButton() {
     }
   };
 
-  const getCurrentNetworkName = () => {
-    const network = SUPPORTED_NETWORKS.find((n) => n.chainId === chainId);
-    return network?.name || "Unknown";
-  };
-
   if (!isConnected) {
     return (
       <Button
@@ -93,6 +88,7 @@ export default function ConnectButton() {
         size='sm'
         className='text-sm'
       >
+        <Wallet className='h-4 w-4 mr-2' />
         {isConnecting ? "Connecting..." : "Connect"}
       </Button>
     );

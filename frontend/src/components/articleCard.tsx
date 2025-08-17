@@ -27,67 +27,51 @@ import {
 
 interface ArticleCardProps {
   blobId: string;
-  previewText: string;
+  title: string;
+  description: string;
+  ownerAddress: string;
+  uploadDate: string;
   onClickAction: (blobId: string) => void;
 }
 
 export function ArticleCard({
   blobId,
-  previewText,
+  title,
+  description,
+  ownerAddress,
+  uploadDate,
   onClickAction,
 }: ArticleCardProps) {
   const [isHovered, setIsHovered] = useState(false);
 
-  // Parse preview text to extract title and description
-  const parsePreviewText = (previewText: string) => {
-    if (!previewText) {
-      return {
-        title: "Untitled",
-        description: null,
-      };
-    }
-
-    const lines = previewText.split("\n");
-    const title = lines[0] || "Untitled";
-    const description = lines.slice(2).join("\n").trim();
-
-    return {
-      title,
-      description:
-        description && description.length > 0
-          ? description.substring(0, 150) +
-            (description.length > 150 ? "..." : "")
-          : null,
-    };
+  // Format address for display
+  const formatAddress = (address: string) => {
+    if (!address) return "Unknown";
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
-  // Extract metadata from preview text
-  const extractMetadata = (previewText: string) => {
-    if (!previewText) {
-      return { title: "Untitled", uploadDate: "Recent", tags: [] };
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "Recent";
+    try {
+      return new Date(dateString).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch (error) {
+      return "Recent";
     }
-
-    const lines = previewText.split("\n");
-    const title = lines[0] || "Untitled";
-
-    // Try to extract date from the text (simple pattern matching)
-    const dateMatch = previewText.match(
-      /\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}/
-    );
-    const uploadDate = dateMatch ? dateMatch[0] : "Recent";
-
-    // Try to extract category/tags
-    const tagMatch = previewText.match(/#(\w+)/g);
-    const tags = tagMatch ? tagMatch.slice(0, 3) : [];
-
-    return { title, uploadDate, tags };
   };
 
-  const { title, description } = parsePreviewText(previewText);
-  const { uploadDate, tags } = extractMetadata(previewText);
+  // Extract tags from description (if any)
+  const extractTags = (text: string) => {
+    if (!text) return [];
+    const tagMatch = text.match(/#(\w+)/g);
+    return tagMatch ? tagMatch.slice(0, 3) : [];
+  };
 
-  // Mock author address (in real app, this would come from the article data)
-  const mockAuthorAddress = "0x1234...5678";
+  const tags = extractTags(description);
 
   return (
     <Card
@@ -108,7 +92,7 @@ export function ArticleCard({
                   : "ARTICLE"}
               </Badge>
               <span className='text-sm text-muted-foreground'>
-                by {mockAuthorAddress}
+                by {formatAddress(ownerAddress)}
               </span>
             </div>
 
@@ -129,7 +113,7 @@ export function ArticleCard({
               <div className='flex items-center gap-4 text-xs text-muted-foreground'>
                 <div className='flex items-center gap-1'>
                   <Star className='h-3 w-3 text-yellow-500' />
-                  <span>{uploadDate}</span>
+                  <span>{formatDate(uploadDate)}</span>
                 </div>
                 <div className='flex items-center gap-1'>
                   <ThumbsUp className='h-3 w-3' />
