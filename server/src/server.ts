@@ -371,7 +371,7 @@ app.post("/api/upload", async (req, res) => {
     try {
       // Create preview text for local storage - store 10% of content as preview
       // Format: "title\n\ndescription\n\ncontentPreview"
-      const contentPreview = content.length > 100 ? content.substring(0, Math.floor(content.length * 0.3)) : content;
+      const contentPreview = content.substring(0, Math.floor(content.length * 0.3));
       const previewText = `${title}\n\n${description}\n\n${contentPreview}`;
 
       let contentBlobId: string;
@@ -557,7 +557,8 @@ app.get("/api/blobs/:id/preview", (req, res) => {
     const previewParts = blob.previewText.split("\n\n");
     const title = previewParts[0] || "";
     const description = previewParts[1] || "";
-    const contentPreview = previewParts[2] || "";
+    // Get the rest of the previewText as one piece (everything after title and description)
+    const contentPreview = previewParts.length > 2 ? previewParts.slice(2).join("\n\n") : "";
 
     const response = {
       blobId: id,

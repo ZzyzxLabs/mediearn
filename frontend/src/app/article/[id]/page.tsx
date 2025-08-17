@@ -263,7 +263,7 @@ export default function ArticleDetailPage() {
                     </CardHeader>
 
                     <CardContent className='pt-8'>
-                        <div className='bg-muted rounded-lg p-8'>
+                        <div className='bg-muted rounded-lg p-8 text-lg'>
                             <MarkdownViewer content={article.content} />
                         </div>
                     </CardContent>
