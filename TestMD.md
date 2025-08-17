@@ -1,5 +1,10 @@
+---
+title: Collect your documents with a book
+tags: [Templates, Book]
+
+---
+
 # Zzyzx Club Starter Pack!
-View the book with "<i class="fa fa-book fa-fw"></i> Book Mode".
 
 The order of the recommendation list is from **easy** to **hard**. In most cases, we recommend you to learn in the order, but for sure to checkout out all resources.
 
@@ -21,18 +26,3 @@ The order of the recommendation list is from **easy** to **hard**. In most cases
 
 ## Blockchain research & news
 - [A16z Crypto](https://a16zcrypto.com/): comprehensive research on all blockchain and very great news articles
-
-
-Examples
----
-- [Book example](/s/book-example)
-- [Slide example](/s/slide-example)
-- [YAML metadata](/s/yaml-metadata)
-- [Features](/s/features)
-
-Themes
----
-- [Dark theme](/theme-dark?both)
-- [Vertical alignment](/theme-vertical-writing?both)
-
-###### tags: `Templates` `Book`
