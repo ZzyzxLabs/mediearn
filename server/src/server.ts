@@ -121,44 +121,30 @@ app.use(express.static("public"));
 
 // x402 Payment Protocol - automatically handles HTTP 402 and payment verification
 // This must be applied BEFORE the routes to intercept requests
+console.log("🔧 Setting up x402 payment middleware...");
+
 app.use(
   paymentMiddleware(
     process.env.RESOURCE_WALLET_ADDRESS ||
       "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da", // Your receiving wallet
     {
-      "POST /api/upload": {
+      "GET /api/test-payment": {
         // USDC amount in dollars
         price: "$0.01",
         network: "base-sepolia", // for mainnet, see Running on Mainnet section
         // Optional: Add metadata for better discovery in x402 Bazaar
         config: {
-          description: "Upload content to Walrus decentralized storage",
-          inputSchema: {
-            type: "object",
-            properties: {
-              title: { type: "string", description: "Article title" },
-              content: { type: "string", description: "Article content" },
-              ownerAddress: {
-                type: "string",
-                description: "Owner wallet address",
-              },
-              description: {
-                type: "string",
-                description: "Article description",
-              },
-            },
-          },
+          description: "Test payment endpoint",
+          inputSchema: {},
           outputSchema: {
             type: "object",
             properties: {
-              success: { type: "boolean" },
               message: { type: "string" },
-              blobInfo: { type: "object" },
             },
           },
         },
       },
-      "GET /api/blobs/:id/content": {
+      "GET /api/blobs/*/content": {
         // USDC amount in dollars
         price: "$0.01",
         network: "base-sepolia", // for mainnet, see Running on Mainnet section
@@ -214,6 +200,14 @@ app.use(
     }
   )
 );
+
+console.log("✅ x402 payment middleware configured successfully");
+
+// Test route to verify x402 middleware
+app.get("/api/test-payment", (req, res) => {
+  console.log("🔍 Test payment route accessed");
+  res.json({ message: "This route should require payment" });
+});
 
 // Routes
 
@@ -441,6 +435,14 @@ app.get("/api/blobs/preview", (req, res) => {
 
 // Content endpoint - now protected by x402 middleware
 app.get("/api/blobs/:id/content", async (req, res) => {
+  console.log("🔍 Content endpoint accessed:", {
+    id: req.params.id,
+    userAddress: req.query.userAddress,
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+  });
+
   try {
     const { id } = req.params;
     const userAddress = req.query.userAddress as string;
@@ -462,6 +464,8 @@ app.get("/api/blobs/:id/content", async (req, res) => {
         .status(404)
         .json({ error: "Content not available for this blob" });
     }
+
+    console.log("✅ Payment middleware bypassed - content access granted");
 
     // If we reach here, payment has been verified by x402 middleware
     // Fetch content from Walrus

@@ -17,9 +17,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { wrapFetchWithPayment, decodeXPaymentResponse } from "x402-fetch";
-
-import { web3 } from "@/lib/coinbase";
-import { privateKeyToAccount } from "viem/accounts";
+import { useAccount } from "wagmi";
+import { getWalletClient } from "wagmi/actions";
+import { createConfig, http } from "wagmi";
+import { base, baseSepolia } from "wagmi/chains";
+import { createClient } from "viem";
 
 const formSchema = z.object({
   file: z
@@ -44,6 +46,14 @@ type FormData = z.infer<typeof formSchema>;
 export function UploadForm() {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
+  const { address, isConnected, connector, chainId } = useAccount();
+
+  const config = createConfig({
+    chains: [base, baseSepolia],
+    client({ chain }) {
+      return createClient({ chain, transport: http() });
+    },
+  });
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -59,12 +69,10 @@ export function UploadForm() {
     setMessage("");
 
     try {
-      // Get user's address from web3
-      const accounts = await web3.eth.getAccounts();
-      if (!accounts || accounts.length === 0) {
+      // Check if wallet is connected
+      if (!isConnected || !address) {
         throw new Error("Please connect your wallet first");
       }
-      const userAddress = accounts[0];
 
       // Read file content as text
       const content = await data.file.text();
@@ -73,20 +81,30 @@ export function UploadForm() {
       const uploadData = {
         title: data.title.trim(),
         content: content,
-        ownerAddress: userAddress,
+        ownerAddress: address,
         description: data.description || "",
       };
 
-      const hardCodedPrivateKey =
-        "0x21f6ad4a9bcab0cf664e19f0cf0682aad455f43de3721710a1ea50519017b218";
-      const hardCodedAccount = privateKeyToAccount(hardCodedPrivateKey);
+      const walletClient = await getWalletClient(config, {
+        account: address,
+        chainId: chainId,
+        connector: connector,
+      });
 
-      // Create fetchWithPayment wrapper with proper configuration
-      const fetchWithPayment = wrapFetchWithPayment(fetch, hardCodedAccount);
+      if (!walletClient) {
+        setMessage("Wallet client not available");
+        return;
+      }
+
+      // Create fetchWithPayment wrapper using the wallet client
+      const fetchWithPayment = wrapFetchWithPayment(
+        fetch,
+        walletClient as unknown as Parameters<typeof wrapFetchWithPayment>[1]
+      );
 
       console.log("Making upload request with payment...", {
         url: "http://localhost:8000/api/upload",
-        userAddress,
+        address,
         uploadData: {
           ...uploadData,
           content: `${uploadData.content.substring(0, 100)}...`,

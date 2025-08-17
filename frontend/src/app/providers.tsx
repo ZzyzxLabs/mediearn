@@ -1,16 +1,16 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { http, WagmiProvider, createConfig } from "wagmi";
-import { mainnet, sepolia } from "wagmi/chains";
+import { createConfig, http, WagmiProvider } from "wagmi";
+import { base, baseSepolia } from "wagmi/chains";
 import { coinbaseWallet } from "wagmi/connectors";
+import { createClient } from "viem";
 
 const config = createConfig({
-  chains: [mainnet, sepolia],
+  chains: [base, baseSepolia],
   connectors: [coinbaseWallet()],
-  transports: {
-    [mainnet.id]: http(),
-    [sepolia.id]: http(),
+  client({ chain }) {
+    return createClient({ chain, transport: http() });
   },
 });
 

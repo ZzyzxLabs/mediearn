@@ -8,8 +8,11 @@ import { apiClient, ArticlePreview, ArticleContent } from "@/lib/api";
 import { ArticleCard } from "@/components/articleCard";
 import { ArticleDetailCard } from "@/components/articleDetailCard";
 import { wrapFetchWithPayment, decodeXPaymentResponse } from "x402-fetch";
-import { web3 } from "@/lib/coinbase";
-import { privateKeyToAccount } from "viem/accounts";
+import { useAccount } from "wagmi";
+import { getWalletClient } from "wagmi/actions";
+import { createConfig, http } from "wagmi";
+import { base, baseSepolia } from "wagmi/chains";
+import { createClient } from "viem";
 
 export default function HomePage() {
   const [articles, setArticles] = useState<ArticlePreview[]>([]);
@@ -19,6 +22,14 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [loadingContent, setLoadingContent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { address, isConnected, connector, chainId } = useAccount();
+
+  const config = createConfig({
+    chains: [base, baseSepolia],
+    client({ chain }) {
+      return createClient({ chain, transport: http() });
+    },
+  });
 
   // Fetch all article previews
   const fetchArticles = async () => {
@@ -38,31 +49,39 @@ export default function HomePage() {
   const fetchArticleContent = async (blobId: string) => {
     try {
       setLoadingContent(true);
-      setError(null); // Clear any previous errors
+      setError(null);
 
-      // Get user's address from web3
-      const accounts = await web3.eth.getAccounts();
-      if (!accounts || accounts.length === 0) {
+      // Check if wallet is connected
+      if (!isConnected || !address) {
         throw new Error("Please connect your wallet first");
       }
-      const userAddress = accounts[0];
-
-      // Create hardcoded account for x402-fetch (same as upload form)
-      const hardCodedPrivateKey =
-        "0x21f6ad4a9bcab0cf664e19f0cf0682aad455f43de3721710a1ea50519017b218";
-      const hardCodedAccount = privateKeyToAccount(hardCodedPrivateKey);
-
-      // Create fetchWithPayment wrapper
-      const fetchWithPayment = wrapFetchWithPayment(fetch, hardCodedAccount);
 
       console.log("Fetching article content with payment...", {
         blobId,
-        userAddress,
+        userAddress: address,
       });
+
+      const walletClient = await getWalletClient(config, {
+        account: address,
+        chainId: chainId,
+        connector: connector,
+      });
+
+      if (!walletClient) {
+        throw new Error("Wallet client not available");
+      }
+
+      console.log("walletClient", walletClient);
+
+      // For x402-fetch, we need to pass the wallet client
+      const fetchWithPayment = wrapFetchWithPayment(
+        fetch,
+        walletClient as unknown as Parameters<typeof wrapFetchWithPayment>[1]
+      );
 
       // Make the request with payment handling
       const response = await fetchWithPayment(
-        `http://localhost:8000/api/blobs/${blobId}/content?userAddress=${userAddress}`,
+        `http://localhost:8000/api/blobs/${blobId}/content?userAddress=${address}`,
         {
           method: "GET",
           headers: {
@@ -78,16 +97,6 @@ export default function HomePage() {
       });
 
       if (!response.ok) {
-        // Handle 402 Payment Required specifically
-        if (response.status === 402) {
-          const errorData = await response.json();
-          throw new Error(
-            `Payment required: ${
-              errorData.error || "Please complete payment to access content"
-            }`
-          );
-        }
-
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to fetch article content");
       }
