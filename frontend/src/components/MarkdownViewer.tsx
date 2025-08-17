@@ -69,15 +69,21 @@ export default function MarkdownViewer({ src, content }: Props) {
           p: ({ node, ...props }) => (
             <p
               {...props}
-              className='leading-7 [&:not(:first-child)]:mt-6 mb-4'
+              className='leading-7 [&:not(:first-child)]:mt-6 mb-4 text-lg'
             />
           ),
           // Style lists
           ul: ({ node, ...props }) => (
-            <ul {...props} className='my-6 ml-6 list-disc [&>li]:mt-2' />
+            <ul
+              {...props}
+              className='my-6 ml-6 list-disc [&>li]:mt-2 text-lg'
+            />
           ),
           ol: ({ node, ...props }) => (
-            <ol {...props} className='my-6 ml-6 list-decimal [&>li]:mt-2' />
+            <ol
+              {...props}
+              className='my-6 ml-6 list-decimal [&>li]:mt-2 text-lg'
+            />
           ),
           // Style code blocks
           code: ({ node, inline, className, children, ...props }: any) => {
@@ -85,7 +91,7 @@ export default function MarkdownViewer({ src, content }: Props) {
               return (
                 <code
                   {...props}
-                  className='relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm font-semibold'
+                  className='relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-base font-semibold'
                 >
                   {children}
                 </code>
@@ -94,7 +100,7 @@ export default function MarkdownViewer({ src, content }: Props) {
             return (
               <code
                 {...props}
-                className='relative rounded-lg bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm font-semibold block p-4 my-4'
+                className='relative rounded-lg bg-muted px-[0.3rem] py-[0.2rem] font-mono text-base font-semibold block p-4 my-4'
               >
                 {children}
               </code>
@@ -104,7 +110,7 @@ export default function MarkdownViewer({ src, content }: Props) {
           blockquote: ({ node, ...props }) => (
             <blockquote
               {...props}
-              className='mt-6 border-l-2 border-primary pl-6 italic'
+              className='mt-6 border-l-2 border-primary pl-6 italic text-lg'
             />
           ),
           // Style horizontal rules (separator lines)
@@ -120,13 +126,13 @@ export default function MarkdownViewer({ src, content }: Props) {
           th: ({ node, ...props }) => (
             <th
               {...props}
-              className='border px-4 py-2 text-left font-bold [&[align=center]]:text-center [&[align=right]]:text-right'
+              className='border px-4 py-2 text-left font-bold text-lg [&[align=center]]:text-center [&[align=right]]:text-right'
             />
           ),
           td: ({ node, ...props }) => (
             <td
               {...props}
-              className='border px-4 py-2 text-left [&[align=center]]:text-center [&[align=right]]:text-right'
+              className='border px-4 py-2 text-left text-lg [&[align=center]]:text-center [&[align=right]]:text-right'
             />
           ),
         }}

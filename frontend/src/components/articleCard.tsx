@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Card,
@@ -25,6 +25,9 @@ import {
   Bookmark,
   MoreHorizontal,
 } from "lucide-react";
+import { createPublicClient, http } from "viem";
+import { mainnet } from "viem/chains";
+import { useEnsAvatar } from "wagmi";
 
 interface ArticleCardProps {
   blobId: string;
@@ -44,7 +47,55 @@ export function ArticleCard({
   onClickAction,
 }: ArticleCardProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const [ensName, setEnsName] = useState<string | null>(null);
+  const [isLoadingEns, setIsLoadingEns] = useState(false);
   const router = useRouter();
+
+  // Get ENS avatar using wagmi hook
+  const { data: ensAvatar } = useEnsAvatar({
+    name: ensName || undefined,
+    chainId: 1, // Ethereum Mainnet
+  });
+
+  const publicClient = createPublicClient({
+    chain: mainnet,
+    transport: http(),
+  });
+
+  async function getENSName(address: `0x${string}`) {
+    try {
+      const ensName = await publicClient.getEnsName({ address });
+      return ensName;
+    } catch (error) {
+      console.error("Error fetching ENS name:", error);
+      return null;
+    }
+  }
+
+  // Fetch ENS name on component mount
+  useEffect(() => {
+    const fetchENSName = async () => {
+      if (!ownerAddress || !ownerAddress.startsWith("0x")) return;
+
+      setIsLoadingEns(true);
+      try {
+        const ens = await getENSName(ownerAddress as `0x${string}`);
+        setEnsName(ens);
+      } catch (error) {
+        console.error("Error fetching ENS name:", error);
+      } finally {
+        setIsLoadingEns(false);
+      }
+    };
+
+    fetchENSName();
+  }, [ownerAddress]);
+
+  // Get display name (ENS name or formatted address)
+  const getDisplayName = () => {
+    if (ensName) return ensName;
+    return formatAddress(ownerAddress);
+  };
 
   // Navigate to preview page instead of directly requesting payment
   const handleClick = () => {
@@ -98,9 +149,11 @@ export function ArticleCard({
                   ? tags[0].replace("#", "").toUpperCase()
                   : "ARTICLE"}
               </Badge>
-              <span className='text-sm text-muted-foreground'>
-                by {formatAddress(ownerAddress)}
-              </span>
+              <div className='flex items-center'>
+                <span className='text-sm text-muted-foreground'>
+                  {isLoadingEns ? "Loading..." : getDisplayName()}
+                </span>
+              </div>
             </div>
 
             {/* Title */}
