@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import {
   WalrusClient,
   TESTNET_WALRUS_PACKAGE_CONFIG,
@@ -19,6 +20,92 @@ import { paymentMiddleware } from "x402-express";
 
 // Load environment variables
 dotenv.config();
+
+// Check for required environment variables
+if (!process.env.AES_SECRET) {
+  console.warn("⚠️  AES_SECRET environment variable not set - content encryption will fail");
+} else {
+  console.log("✅ AES_SECRET environment variable found");
+}
+
+// AES encryption/decryption functions
+function encryptContent(content: string): { encryptedData: Buffer; iv: Buffer } {
+  const aesSecret = process.env.AES_SECRET;
+  if (!aesSecret) {
+    throw new Error("AES_SECRET environment variable is required");
+  }
+
+  // Remove '0x' prefix if present and convert to Buffer
+  const key = Buffer.from(aesSecret.replace('0x', ''), 'hex');
+
+  // Ensure key is exactly 32 bytes (256 bits) for AES-256
+  if (key.length !== 32) {
+    throw new Error(`AES key must be 32 bytes, got ${key.length} bytes`);
+  }
+
+  // Generate random IV
+  const iv = crypto.randomBytes(16);
+
+  // Create cipher using createCipheriv (modern API)
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+
+  // Encrypt content - ensure we get the complete encrypted data
+  const encrypted = Buffer.concat([
+    cipher.update(content, 'utf8'),
+    cipher.final()
+  ]);
+
+  console.log(`🔐 Encryption details:`);
+  console.log(`   - Original content length: ${content.length} chars`);
+  console.log(`   - Encrypted data length: ${encrypted.length} bytes`);
+  console.log(`   - IV length: ${iv.length} bytes`);
+  console.log(`   - Key length: ${key.length} bytes`);
+
+  return {
+    encryptedData: encrypted,
+    iv: iv
+  };
+}
+
+function decryptContent(encryptedData: Buffer, iv: Buffer): string {
+  const aesSecret = process.env.AES_SECRET;
+  if (!aesSecret) {
+    throw new Error("AES_SECRET environment variable is required");
+  }
+
+  // Remove '0x' prefix if present and convert to Buffer
+  const key = Buffer.from(aesSecret.replace('0x', ''), 'hex');
+
+  // Ensure key is exactly 32 bytes (256 bits) for AES-256
+  if (key.length !== 32) {
+    throw new Error(`AES key must be 32 bytes, got ${key.length} bytes`);
+  }
+
+  console.log(`🔓 Decryption details:`);
+  console.log(`   - Encrypted data length: ${encryptedData.length} bytes`);
+  console.log(`   - IV length: ${iv.length} bytes`);
+  console.log(`   - Key length: ${key.length} bytes`);
+
+  try {
+    // Create decipher using createDecipheriv (modern API)
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+
+    // Decrypt content - ensure we get the complete decrypted data
+    const decrypted = Buffer.concat([
+      decipher.update(encryptedData),
+      decipher.final()
+    ]);
+
+    console.log(`   - Decrypted data length: ${decrypted.length} bytes`);
+    return decrypted.toString('utf8');
+  } catch (error) {
+    console.error(`❌ Decryption failed:`);
+    console.error(`   - Error: ${error}`);
+    console.error(`   - Encrypted data (first 32 bytes): ${encryptedData.slice(0, 32).toString('hex')}`);
+    console.error(`   - IV: ${iv.toString('hex')}`);
+    throw error;
+  }
+}
 
 const blobStorage = new BlobStorage();
 
@@ -126,7 +213,7 @@ console.log("🔧 Setting up x402 payment middleware...");
 app.use(
   paymentMiddleware(
     process.env.RESOURCE_WALLET_ADDRESS ||
-      "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da", // Your receiving wallet
+    "0x4ca0d90fb63968fc4327f8dd6c8119fbd745e748c7916a531da273440835b4da", // Your receiving wallet
     {
       "GET /api/test-payment": {
         // USDC amount in dollars
@@ -234,7 +321,14 @@ app.post("/api/upload", async (req, res) => {
     }
 
     console.log("Uploading to Walrus...");
-    const fileBuffer = new Uint8Array(Buffer.from(content, "utf8"));
+
+    // Encrypt content before uploading to Walrus
+    console.log("🔐 Encrypting content...");
+    const { encryptedData, iv } = encryptContent(content);
+    const fileBuffer = new Uint8Array(encryptedData);
+
+    console.log(`🔐 Content encrypted: ${content.length} chars → ${encryptedData.length} bytes`);
+    console.log(`🔑 IV: ${iv.toString('hex')}`);
 
     // Check WAL balance first
     try {
@@ -294,8 +388,7 @@ app.post("/api/upload", async (req, res) => {
         console.log(`   - Article content: ${totalBytes} bytes`);
         console.log(`   - Storage duration: ${epochs} epochs`);
         console.log(
-          `   - Estimated WAL cost: ${
-            (totalBytes * epochs) / 1000000
+          `   - Estimated WAL cost: ${(totalBytes * epochs) / 1000000
           } WAL (rough estimate)`
         );
 
@@ -336,8 +429,7 @@ app.post("/api/upload", async (req, res) => {
       } catch (writeError) {
         console.error("⚠️ writeFiles failed with error:", writeError);
         throw new Error(
-          `Walrus upload failed: ${
-            writeError instanceof Error ? writeError.message : "Unknown error"
+          `Walrus upload failed: ${writeError instanceof Error ? writeError.message : "Unknown error"
           }`
         );
       }
@@ -366,6 +458,7 @@ app.post("/api/upload", async (req, res) => {
               isCertified: true,
               uploadStatus: "success",
               uploadDate: new Date().toISOString(),
+              iv: iv.toString('hex'), // Store IV for decryption
             },
             overallStatus: "success",
           },
@@ -483,7 +576,33 @@ app.get("/api/blobs/:id/content", async (req, res) => {
         return res.status(404).json({ error: "No files returned from Walrus" });
       }
       const file = files[0];
-      const processedContent = await file.text();
+
+      // Get encrypted content as raw bytes, not as text
+      const encryptedContent = await file.bytes();
+
+      // Check if content is encrypted (has IV) or plain text (no IV)
+      let finalContent: string;
+
+      if (blob.walrus.contentBlob.iv) {
+        // Content is encrypted - decrypt it
+        console.log("🔓 Decrypting encrypted content...");
+
+        const iv = Buffer.from(blob.walrus.contentBlob.iv, 'hex');
+        console.log(`🔑 Retrieved IV: ${blob.walrus.contentBlob.iv}`);
+
+        const decryptedContent = decryptContent(Buffer.from(encryptedContent), iv);
+        console.log(`🔓 Content decrypted: ${encryptedContent.length} bytes → ${decryptedContent.length} chars`);
+
+        // Use decrypted content
+        finalContent = decryptedContent;
+      } else {
+        // Content is not encrypted (old articles) - use as-is
+        console.log("📝 Content is not encrypted (old article) - using as-is");
+
+        // Convert bytes to text for old content
+        finalContent = Buffer.from(encryptedContent).toString('utf8');
+        console.log(`📝 Plain text content length: ${finalContent.length} chars`);
+      }
 
       // Record payment access
       const paymentId = `pay_${Date.now()}_${Math.random()
@@ -499,7 +618,7 @@ app.get("/api/blobs/:id/content", async (req, res) => {
       res.json({
         blobId: id,
         title: blob.title,
-        content: processedContent,
+        content: finalContent,
         metadata: {
           uploadDate: blob.uploadDate,
           ownerAddress: blob.ownerAddress,
@@ -576,8 +695,7 @@ app.listen(PORT, () => {
   console.log(`📈 Stats endpoint: http://localhost:${PORT}/api/stats`);
   console.log(`🌐 Web interface: http://localhost:${PORT}`);
   console.log(
-    `🔑 Walrus Status: ${
-      keypair ? "Private key configured" : "Private key parsing needed"
+    `🔑 Walrus Status: ${keypair ? "Private key configured" : "Private key parsing needed"
     }`
   );
   console.log(`💾 Database: ${blobStorage.getStats().totalBlobs} blobs loaded`);

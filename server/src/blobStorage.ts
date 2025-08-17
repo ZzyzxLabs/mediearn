@@ -36,6 +36,7 @@ export interface BlobInfo {
             isCertified: boolean;
             uploadStatus: string;
             uploadDate: string;
+            iv: string; // Store IV for decryption
         };
         overallStatus: string;
     };
@@ -74,6 +75,12 @@ export class BlobStorage {
             if (!blob.payments) {
                 // Add missing payments tracking
                 blob.payments = {};
+                migrated = true;
+            }
+
+            // Ensure walrus.contentBlob.iv exists (for encryption compatibility)
+            if (blob.walrus?.contentBlob && !blob.walrus.contentBlob.iv) {
+                blob.walrus.contentBlob.iv = ''; // Empty IV means unencrypted content
                 migrated = true;
             }
         }
@@ -142,7 +149,8 @@ export class BlobStorage {
                     storageEpochs: 1,
                     isCertified: false,
                     uploadStatus: 'pending',
-                    uploadDate: new Date().toISOString()
+                    uploadDate: new Date().toISOString(),
+                    iv: '' // Initialize empty IV
                 },
                 overallStatus: 'pending'
             }
