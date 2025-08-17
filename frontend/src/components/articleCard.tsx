@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -24,8 +25,6 @@ import {
   Bookmark,
   MoreHorizontal,
 } from "lucide-react";
-import { createPublicClient, http } from "viem";
-import { mainnet } from "viem/chains";
 
 interface ArticleCardProps {
   blobId: string;
@@ -33,7 +32,7 @@ interface ArticleCardProps {
   description: string;
   ownerAddress: string;
   uploadDate: string;
-  onClickAction: (blobId: string) => void;
+  onClickAction: (blobId: string) => void; // Keep for backward compatibility but won't be used
 }
 
 export function ArticleCard({
@@ -45,8 +44,12 @@ export function ArticleCard({
   onClickAction,
 }: ArticleCardProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const [ensName, setEnsName] = useState<string | null>(null);
-  const [isLoadingEns, setIsLoadingEns] = useState(false);
+  const router = useRouter();
+
+  // Navigate to preview page instead of directly requesting payment
+  const handleClick = () => {
+    router.push(`/preview/${blobId}`);
+  };
 
   // Format address for display
   const formatAddress = (address: string) => {
@@ -75,47 +78,6 @@ export function ArticleCard({
     return tagMatch ? tagMatch.slice(0, 3) : [];
   };
 
-  const publicClient = createPublicClient({
-    chain: mainnet,
-    transport: http(),
-  });
-
-  async function getENSName(address: `0x${string}`) {
-    try {
-      const ensName = await publicClient.getEnsName({ address });
-      // console.log(ensName);
-      return ensName;
-    } catch (error) {
-      console.error("Error fetching ENS name:", error);
-      return null;
-    }
-  }
-
-  // Fetch ENS name on component mount
-  useEffect(() => {
-    const fetchENSName = async () => {
-      if (!ownerAddress || !ownerAddress.startsWith("0x")) return;
-
-      setIsLoadingEns(true);
-      try {
-        const ens = await getENSName(ownerAddress as `0x${string}`);
-        setEnsName(ens);
-      } catch (error) {
-        console.error("Error fetching ENS name:", error);
-      } finally {
-        setIsLoadingEns(false);
-      }
-    };
-
-    fetchENSName();
-  }, [ownerAddress]);
-
-  // Get display name (ENS name or formatted address)
-  const getDisplayName = () => {
-    if (ensName) return ensName;
-    return formatAddress(ownerAddress);
-  };
-
   const tags = extractTags(description);
 
   return (
@@ -123,7 +85,7 @@ export function ArticleCard({
       className={`cursor-pointer transition-shadow hover:shadow-md`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onClick={() => onClickAction(blobId)}
+      onClick={handleClick}
     >
       <CardContent className='p-6'>
         <div className='flex gap-6'>
@@ -137,7 +99,7 @@ export function ArticleCard({
                   : "ARTICLE"}
               </Badge>
               <span className='text-sm text-muted-foreground'>
-                by {isLoadingEns ? "Loading..." : getDisplayName()}
+                by {formatAddress(ownerAddress)}
               </span>
             </div>
 

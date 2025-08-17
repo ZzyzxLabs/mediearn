@@ -371,7 +371,7 @@ app.post("/api/upload", async (req, res) => {
     try {
       // Create preview text for local storage - store 10% of content as preview
       // Format: "title\n\ndescription\n\ncontentPreview"
-      const contentPreview = content.length > 100 ? content.substring(0, Math.floor(content.length * 0.1)) : content;
+      const contentPreview = content.length > 100 ? content.substring(0, Math.floor(content.length * 0.3)) : content;
       const previewText = `${title}\n\n${description}\n\n${contentPreview}`;
 
       let contentBlobId: string;

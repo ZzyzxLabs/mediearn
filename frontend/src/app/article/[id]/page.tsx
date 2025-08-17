@@ -5,10 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, FileText, User, Calendar, CheckCircle } from "lucide-react";
+import { User, Calendar, ExternalLink } from "lucide-react";
+import MarkdownViewer from "@/components/MarkdownViewer";
+import { createPublicClient, http } from "viem";
+import { mainnet } from "viem/chains";
+import { useEnsAvatar } from "wagmi";
 import { ArticleContent } from "@/lib/api";
 import { contentStore } from "@/lib/contentStore";
-import MarkdownViewer from "@/components/MarkdownViewer";
 
 export default function ArticleDetailPage() {
     const params = useParams();
@@ -16,8 +19,66 @@ export default function ArticleDetailPage() {
     const [article, setArticle] = useState<ArticleContent | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [ensName, setEnsName] = useState<string | null>(null);
+    const [isLoadingEns, setIsLoadingEns] = useState(false);
 
     const blobId = params.id as string;
+
+    // Get ENS avatar using wagmi hook
+    const { data: ensAvatar } = useEnsAvatar({
+        name: ensName || undefined,
+        chainId: 1, // Ethereum Mainnet
+    });
+
+    const formatAddress = (address: string) => {
+        return `${address.slice(0, 6)}...${address.slice(-4)}`;
+    };
+
+    const formatDate = (dateString: string) => {
+        return new Date(dateString).toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    };
+
+    const publicClient = createPublicClient({
+        chain: mainnet,
+        transport: http(),
+    });
+
+    async function getENSName(address: `0x${string}`) {
+        try {
+            const ensName = await publicClient.getEnsName({ address });
+            return ensName;
+        } catch (error) {
+            console.error("Error fetching ENS name:", error);
+            return null;
+        }
+    }
+
+    // Fetch ENS name on component mount
+    useEffect(() => {
+        const fetchENSName = async () => {
+            if (!article?.metadata.ownerAddress || !article.metadata.ownerAddress.startsWith("0x")) return;
+
+            setIsLoadingEns(true);
+            try {
+                const ens = await getENSName(article.metadata.ownerAddress as `0x${string}`);
+                setEnsName(ens);
+            } catch (error) {
+                console.error("Error fetching ENS name:", error);
+            } finally {
+                setIsLoadingEns(false);
+            }
+        };
+
+        if (article) {
+            fetchENSName();
+        }
+    }, [article?.metadata.ownerAddress]);
 
     useEffect(() => {
         console.log("ArticleDetailPage: useEffect triggered", { blobId });
@@ -85,6 +146,19 @@ export default function ArticleDetailPage() {
         }
     }, [blobId]);
 
+    // Get display name (ENS name or formatted address)
+    const getDisplayName = () => {
+        if (ensName) return ensName;
+        return article ? formatAddress(article.metadata.ownerAddress) : "Unknown";
+    };
+
+    // Open explorer for the address
+    const openExplorer = () => {
+        if (!article) return;
+        const explorerUrl = `https://etherscan.io/address/${article.metadata.ownerAddress}`;
+        window.open(explorerUrl, "_blank");
+    };
+
     if (loading) {
         return (
             <div className='min-h-screen flex items-center justify-center'>
@@ -98,7 +172,7 @@ export default function ArticleDetailPage() {
 
     if (error || !article) {
         return (
-            <div className='min-h-screen flex items-center justify-center'>
+            <div className='min-h-screen'>
                 <div className='text-center max-w-md'>
                     <h2 className='text-xl font-semibold text-red-600 mb-4'>Article Content Not Found</h2>
                     <p className='text-gray-600 mb-6'>
@@ -138,98 +212,62 @@ export default function ArticleDetailPage() {
         );
     }
 
-    // Format address for display
-    const formatAddress = (address: string) => {
-        if (!address) return "Unknown";
-        return `${address.slice(0, 6)}...${address.slice(-4)}`;
-    };
-
-    // Format date for display
-    const formatDate = (dateString: string) => {
-        if (!dateString) return "Recent";
-        try {
-            return new Date(dateString).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-            });
-        } catch (error) {
-            return "Recent";
-        }
-    };
-
     return (
         <div className='min-h-screen'>
-            <div className='container mx-auto px-4 py-8'>
+            <div className='container mx-auto px-4 py-8 max-w-6xl'>
                 {/* Back button */}
-                <div className='mb-6'>
-                    <Button
-                        variant='ghost'
-                        onClick={() => router.push('/')}
-                        className='flex items-center gap-2'
-                    >
-                        <ArrowLeft className='h-4 w-4' />
-                        Back to Articles
-                    </Button>
-                </div>
+                <Button variant='ghost' onClick={() => router.push('/')} className='mb-6'>
+                    ← Back to Articles
+                </Button>
 
-                {/* Article Content */}
-                <div className='max-w-4xl mx-auto'>
-                    <Card className='shadow-lg'>
-                        <CardHeader className='pb-4'>
-                            <div className='flex items-start justify-between'>
-                                <div className='flex-1'>
-                                    <div className='flex items-center gap-2 mb-3'>
-                                        <Badge variant='default' className='text-sm bg-green-600'>
-                                            <CheckCircle className='h-3 w-3 mr-1' />
-                                            FULL ACCESS
-                                        </Badge>
-                                        <span className='text-sm text-muted-foreground'>
-                                            by {formatAddress(article.metadata.ownerAddress)}
+                {/* Article content */}
+                <Card>
+                    <CardHeader>
+                        <div className='flex items-start justify-between'>
+                            <div className='flex-1'>
+                                <CardTitle className='mb-6'>{article.title}</CardTitle>
+                                <div className='flex items-center space-x-6 text-muted-foreground'>
+                                    <div className='flex items-center'>
+                                        {ensAvatar ? (
+                                            <img
+                                                src={ensAvatar}
+                                                alt={getDisplayName()}
+                                                className='h-4 w-4 mr-2 rounded-full'
+                                            />
+                                        ) : (
+                                            <User className='h-4 w-4 mr-2' />
+                                        )}
+                                        <span>
+                                            {isLoadingEns ? "Loading..." : getDisplayName()}
                                         </span>
+                                        <Button
+                                            variant='ghost'
+                                            size='sm'
+                                            onClick={openExplorer}
+                                            className='ml-2 h-6 w-6 p-0 hover:bg-muted'
+                                            title='View on Etherscan'
+                                        >
+                                            <ExternalLink className='h-3 w-3' />
+                                        </Button>
                                     </div>
-                                    <CardTitle className='text-3xl font-bold mb-2'>
-                                        {article.title}
-                                    </CardTitle>
-                                    <div className='flex items-center gap-4 text-sm text-muted-foreground'>
-                                        <div className='flex items-center gap-1'>
-                                            <User className='h-4 w-4' />
-                                            <span>{formatAddress(article.metadata.ownerAddress)}</span>
-                                        </div>
-                                        <div className='flex items-center gap-1'>
-                                            <Calendar className='h-4 w-4' />
-                                            <span>{formatDate(article.metadata.uploadDate)}</span>
-                                        </div>
+                                    <div className='flex items-center'>
+                                        <Calendar className='h-4 w-4 mr-2' />
+                                        {formatDate(article.metadata.uploadDate)}
                                     </div>
+                                    <Badge variant='default'>
+                                        Full Access
+                                    </Badge>
                                 </div>
                             </div>
-                        </CardHeader>
+                        </div>
+                    </CardHeader>
 
-                        <CardContent className='pt-0'>
-                            {/* Full Content */}
-                            <div className='prose max-w-none'>
-                                <div className='flex items-center gap-2 mb-4'>
-                                    <FileText className='h-6 w-6 text-green-600' />
-                                    <h3 className='text-xl font-semibold text-green-800'>Full Article Content</h3>
-                                </div>
-                                <div className='bg-white border border-gray-200 rounded-lg p-6'>
-                                    <MarkdownViewer content={article.content} />
-                                </div>
-                            </div>
-
-                            {/* Success Message */}
-                            <div className='bg-green-50 border border-green-200 rounded-lg p-4 mt-6'>
-                                <div className='flex items-center gap-2'>
-                                    <CheckCircle className='h-5 w-5 text-green-600' />
-                                    <h3 className='font-semibold text-green-900'>Access Granted!</h3>
-                                </div>
-                                <p className='text-green-800 text-sm mt-1'>
-                                    You have successfully paid for and accessed this article. Thank you for supporting the author!
-                                </p>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
+                    <CardContent className='pt-8'>
+                        <div className='bg-muted rounded-lg p-8'>
+                            <MarkdownViewer content={article.content} />
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         </div>
     );

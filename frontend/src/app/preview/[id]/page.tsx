@@ -229,14 +229,6 @@ export default function PreviewPage() {
                         <CardHeader className='pb-4'>
                             <div className='flex items-start justify-between'>
                                 <div className='flex-1'>
-                                    <div className='flex items-center gap-2 mb-3'>
-                                        <Badge variant='default' className='text-sm'>
-                                            PREVIEW
-                                        </Badge>
-                                        <span className='text-sm text-muted-foreground'>
-                                            by {formatAddress(preview.ownerAddress)}
-                                        </span>
-                                    </div>
                                     <CardTitle className='text-3xl font-bold mb-2'>
                                         {preview.title}
                                     </CardTitle>
@@ -261,30 +253,8 @@ export default function PreviewPage() {
 
                         <CardContent className='pt-0'>
                             {/* Preview Content */}
-                            <div className='bg-gray-50 rounded-lg p-6 mb-6'>
-                                <div className='flex items-center gap-2 mb-3'>
-                                    <FileText className='h-5 w-5 text-blue-600' />
-                                    <h3 className='text-lg font-semibold'>Preview</h3>
-                                </div>
-                                <div className='prose max-w-none'>
-                                    <MarkdownViewer content={preview.contentPreview} />
-                                </div>
-                            </div>
-
-                            {/* Payment Info */}
-                            <div className='bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6'>
-                                <div className='flex items-center gap-2 mb-2'>
-                                    <Lock className='h-5 w-5 text-blue-600' />
-                                    <h3 className='font-semibold text-blue-900'>Premium Content</h3>
-                                </div>
-                                <p className='text-blue-800 text-sm mb-3'>
-                                    This is a preview of the article. To read the full content, you need to pay {preview.paymentDetails.price} {preview.paymentDetails.currency} on {preview.paymentDetails.network}.
-                                </p>
-                                <div className='flex items-center gap-2 text-sm text-blue-700'>
-                                    <span>Price: {preview.paymentDetails.price} {preview.paymentDetails.currency}</span>
-                                    <span>•</span>
-                                    <span>Network: {preview.paymentDetails.network}</span>
-                                </div>
+                            <div className='mb-6'>
+                                <MarkdownViewer content={preview.contentPreview} />
                             </div>
 
                             {/* Action Button */}
@@ -308,7 +278,7 @@ export default function PreviewPage() {
                                     ) : (
                                         <>
                                             <FileText className='h-5 w-5 mr-2' />
-                                            Read Full Article ({preview.paymentDetails.price} {preview.paymentDetails.currency})
+                                            Read Full Article
                                         </>
                                     )}
                                 </Button>
