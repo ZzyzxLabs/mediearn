@@ -39,6 +39,21 @@ export interface ArticleContent {
   };
 }
 
+export interface BlobPreview {
+  blobId: string;
+  title: string;
+  description: string;
+  contentPreview: string;
+  ownerAddress: string;
+  uploadDate: string;
+  paymentRequired: boolean;
+  paymentDetails: {
+    price: string;
+    currency: string;
+    network: string;
+  };
+}
+
 export interface UploadResponse {
   success: boolean;
   message?: string;
@@ -134,6 +149,20 @@ class ApiClient {
     }
   }
 
+  // Get blob preview text (no payment required)
+  async getBlobPreview(id: string): Promise<BlobPreview | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/api/blobs/${id}/preview`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch blob preview");
+      }
+      return await response.json();
+    } catch (error) {
+      console.error("Failed to fetch blob preview:", error);
+      return null;
+    }
+  }
+
   // Get blob content (matches server endpoint with userAddress parameter)
   async getBlobContent(
     id: string,
@@ -141,8 +170,7 @@ class ApiClient {
   ): Promise<ArticleContent | null> {
     try {
       const response = await fetch(
-        `${
-          this.baseUrl
+        `${this.baseUrl
         }/api/blobs/${id}/content?userAddress=${encodeURIComponent(
           userAddress
         )}`

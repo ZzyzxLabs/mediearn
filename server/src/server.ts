@@ -532,6 +532,62 @@ app.get("/api/blobs/preview", (req, res) => {
   }
 });
 
+// Get blob preview text (no payment required)
+app.get("/api/blobs/:id/preview", (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🔍 Preview endpoint accessed for blob ID: ${id}`);
+
+    const blob = blobStorage.getBlob(id);
+    console.log(`📚 Blob found:`, !!blob);
+
+    if (!blob) {
+      console.log(`❌ Blob not found for ID: ${id}`);
+      return res.status(404).json({ error: "Blob not found" });
+    }
+
+    if (!blob.previewText) {
+      console.log(`❌ No preview text available for blob ID: ${id}`);
+      return res.status(404).json({ error: "Preview not available for this blob" });
+    }
+
+    console.log(`📝 Preview text length: ${blob.previewText.length} characters`);
+
+    // Parse preview text to extract title, description, and content preview
+    const previewParts = blob.previewText.split("\n\n");
+    const title = previewParts[0] || "";
+    const description = previewParts[1] || "";
+    const contentPreview = previewParts[2] || "";
+
+    const response = {
+      blobId: id,
+      title: title,
+      description: description,
+      contentPreview: contentPreview,
+      ownerAddress: blob.ownerAddress,
+      uploadDate: blob.uploadDate,
+      paymentRequired: true,
+      paymentDetails: {
+        price: blob.accessControl.paymentDetails.price,
+        currency: blob.accessControl.paymentDetails.currency,
+        network: blob.accessControl.paymentDetails.network,
+      },
+    };
+
+    console.log(`✅ Preview response prepared:`, {
+      title: response.title,
+      description: response.description,
+      contentPreviewLength: response.contentPreview.length,
+      ownerAddress: response.ownerAddress
+    });
+
+    res.json(response);
+  } catch (error) {
+    console.error("❌ Error reading blob preview:", error);
+    res.status(500).json({ error: "Failed to fetch blob preview" });
+  }
+});
+
 // Content endpoint - now protected by x402 middleware
 app.get("/api/blobs/:id/content", async (req, res) => {
   console.log("🔍 Content endpoint accessed:", {
