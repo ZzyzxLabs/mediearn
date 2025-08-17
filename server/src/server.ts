@@ -369,8 +369,10 @@ app.post("/api/upload", async (req, res) => {
     let blobInfo: BlobInfo;
 
     try {
-      // Create preview text for local storage
-      const previewText = `${title}\n\n${description}`;
+      // Create preview text for local storage - store 10% of content as preview
+      // Format: "title\n\ndescription\n\ncontentPreview"
+      const contentPreview = content.length > 100 ? content.substring(0, Math.floor(content.length * 0.1)) : content;
+      const previewText = `${title}\n\n${description}\n\n${contentPreview}`;
 
       let contentBlobId: string;
 
@@ -502,12 +504,16 @@ app.get("/api/blobs/preview", (req, res) => {
 
     // Return preview information with payment details for each blob
     const previewsWithContent = blobs.map((blob) => {
-      const title = blob.previewText?.split("\n\n")[0] || "";
-      const description = blob.previewText?.split("\n\n")[1] || "";
+      const previewParts = blob.previewText?.split("\n\n") || [];
+      const title = previewParts[0] || "";
+      const description = previewParts[1] || "";
+      const abstract = previewParts[2] || "";
+
       return {
         blobId: blob.id,
         title: title,
         description: description,
+        abstract: abstract,
         ownerAddress: blob.ownerAddress,
         uploadDate: blob.uploadDate,
         paymentRequired: true, // All articles require payment

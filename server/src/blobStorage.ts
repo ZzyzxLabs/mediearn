@@ -8,7 +8,7 @@ export interface BlobInfo {
     uploadDate: string;
     ownerAddress: string;
     isPublic: boolean;
-    previewText?: string; // Optional preview text stored locally
+    previewText?: string; // Optional preview text stored locally (format: "title\n\ndescription\n\ncontentPreview")
     accessControl: {
         type: 'payment-gated'; // All articles are payment-gated
         paymentDetails: {
