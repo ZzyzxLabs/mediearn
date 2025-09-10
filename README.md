@@ -1,4 +1,4 @@
-# MedEarn
+# Mediearn
 
 A decentralized content monetization platform that allows authors to publish articles on Walrus storage and monetize them through x402 payment protocol.
 
